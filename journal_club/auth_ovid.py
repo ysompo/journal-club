@@ -115,7 +115,9 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
         print(f"   Timeout. URL: {page.url}")
 
     time.sleep(3)
-    page.goto(article_url, wait_until="domcontentloaded")
+    # Navigate to fulltext URL (not citation URL — citation page has no download button)
+    ft_url = article_url.replace("/citation/", "/fulltext/")
+    page.goto(ft_url, wait_until="domcontentloaded")
     time.sleep(3)
 
     # Try to find a direct PDF URL in the DOM first

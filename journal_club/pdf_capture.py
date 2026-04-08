@@ -41,12 +41,19 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
         if captured:
             return
         tmp = os.path.join(os.environ.get("TEMP", "C:\\Temp"), download.suggested_filename)
-        download.save_as(tmp)
-        with open(tmp, "rb") as f:
-            body = f.read()
-        if body[:4] == b'%PDF':
-            print(f"   [PDF via download] {len(body):,} bytes — {download.suggested_filename}")
-            captured.append(body)
+        try:
+            download.save_as(tmp)
+        except Exception as e:
+            print(f"   [PDF download save error] {e}")
+            return
+        try:
+            with open(tmp, "rb") as f:
+                body = f.read()
+            if body[:4] == b'%PDF':
+                print(f"   [PDF via download] {len(body):,} bytes — {download.suggested_filename}")
+                captured.append(body)
+        except Exception as e:
+            print(f"   [PDF download read error] {e}")
 
     def on_new_page(new_page):
         new_page.on("response", on_response)
