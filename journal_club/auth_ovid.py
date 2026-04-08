@@ -54,21 +54,37 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
     time.sleep(3)
     print(f"   On: {page.url[:80]}")
 
-    # Click "OpenAthens/Institutional login"
+    # If page shows "previously used institution" card, click it directly
     for sel in [
-        "a:has-text('OpenAthens')",
-        "button:has-text('OpenAthens')",
-        "a:has-text('Institutional')",
-        "a:has-text('Institution')",
-        "[data-target*='openathens']",
+        "button:has-text('Hebrew University of Jerusalem')",
+        "a:has-text('Hebrew University of Jerusalem')",
+        "[class*='institution']:has-text('Hebrew University')",
+        "li:has-text('Hebrew University of Jerusalem')",
     ]:
         try:
-            page.click(sel, timeout=5000)
-            print(f"   [Ovid] Clicked: {sel}")
+            page.click(sel, timeout=3000)
+            print(f"   [Ovid] Clicked previously-used institution: {sel}")
             time.sleep(3)
             break
         except Exception:
             continue
+    else:
+        # Otherwise click "OpenAthens/Institutional login" to get to wayfinder
+        for sel in [
+            "a:has-text('OpenAthens')",
+            "button:has-text('OpenAthens')",
+            "a:has-text('Institutional')",
+            "a:has-text('Institution')",
+            "a:has-text('Find another institution')",
+            "[data-target*='openathens']",
+        ]:
+            try:
+                page.click(sel, timeout=5000)
+                print(f"   [Ovid] Clicked: {sel}")
+                time.sleep(3)
+                break
+            except Exception:
+                continue
 
     print(f"   On: {page.url[:80]}")
 
@@ -102,28 +118,46 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
     page.goto(article_url, wait_until="domcontentloaded")
     time.sleep(3)
 
-    # Click Download (opens dropdown) → PDF
-    print("\n[Ovid Auth] Clicking Download PDF...")
-    for download_sel in [
-        "button:has-text('Download')",
-        "a:has-text('Download')",
-    ]:
-        try:
-            page.click(download_sel, timeout=5000)
-            print(f"   Clicked download toggle: {download_sel}")
-            time.sleep(1)
-            break
-        except Exception:
-            continue
+    # Try to find a direct PDF URL in the DOM first
+    print("\n[Ovid Auth] Extracting PDF URL from authenticated page...")
+    pdf_url = page.evaluate("""() => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        const pdf = links.find(a =>
+            (a.href.includes('.pdf') || a.href.includes('pdf') || a.href.includes('PDF')) &&
+            (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
+        );
+        return pdf ? pdf.href : null;
+    }""")
 
-    for pdf_sel in [
-        "button:has-text('PDF')",
-        "a:has-text('PDF')",
-        "li:has-text('PDF')",
-    ]:
-        try:
-            page.click(pdf_sel, timeout=5000)
-            print(f"   Clicked PDF: {pdf_sel}")
-            break
-        except Exception:
-            continue
+    if pdf_url:
+        print(f"   PDF URL found: {pdf_url[:80]}")
+        print("   Navigating directly to PDF URL...")
+        pdf_tab = page.context.new_page()
+        pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+        time.sleep(5)
+    else:
+        # Fallback: click Download (opens dropdown) → PDF
+        print("   No PDF URL in DOM — clicking Download PDF button...")
+        for download_sel in [
+            "button:has-text('Download')",
+            "a:has-text('Download')",
+        ]:
+            try:
+                page.click(download_sel, timeout=5000)
+                print(f"   Clicked download toggle: {download_sel}")
+                time.sleep(1)
+                break
+            except Exception:
+                continue
+
+        for pdf_sel in [
+            "button:has-text('PDF')",
+            "a:has-text('PDF')",
+            "li:has-text('PDF')",
+        ]:
+            try:
+                page.click(pdf_sel, timeout=5000)
+                print(f"   Clicked PDF: {pdf_sel}")
+                break
+            except Exception:
+                continue
