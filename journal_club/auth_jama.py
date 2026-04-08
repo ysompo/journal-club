@@ -96,23 +96,41 @@ def authenticate_jama(page: Page, article_url: str, email: str, password: str,
 
     time.sleep(3)
 
-    # Navigate to fulltext page
+    # Navigate to fulltext page and extract the PDF URL directly from DOM
     ft_url = article_url.replace("article-abstract", "fullarticle")
     page.goto(ft_url, wait_until="domcontentloaded")
     time.sleep(3)
 
-    # Click Download PDF
-    print("\n[JAMA Auth] Clicking Download PDF...")
-    for sel in [
-        "a:has-text('Download PDF')",
-        "button:has-text('Download PDF')",
-        "[aria-label*='Download PDF']",
-        "a[data-article-action='download-pdf']",
-        ".article-tools__item--pdf a",
-    ]:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   Clicked: {sel}")
-            break
-        except Exception:
-            continue
+    # Extract the direct PDF URL from the authenticated fullarticle DOM
+    print("\n[JAMA Auth] Extracting PDF URL from authenticated page...")
+    pdf_url = page.evaluate("""() => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        const pdf = links.find(a =>
+            (a.href.includes('articlepdf') || a.href.endsWith('.pdf')) &&
+            (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
+        );
+        return pdf ? pdf.href : null;
+    }""")
+
+    if pdf_url:
+        print(f"   PDF URL: {pdf_url[:80]}")
+        print("   Navigating directly to PDF URL...")
+        pdf_tab = page.context.new_page()
+        pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+        time.sleep(5)
+    else:
+        # Fallback: click the Download PDF button
+        print("   No PDF URL in DOM — clicking Download PDF button...")
+        for sel in [
+            "a:has-text('Download PDF')",
+            "button:has-text('Download PDF')",
+            "[aria-label*='Download PDF']",
+            "a[data-article-action='download-pdf']",
+            ".article-tools__item--pdf a",
+        ]:
+            try:
+                page.click(sel, timeout=5000)
+                print(f"   Clicked: {sel}")
+                break
+            except Exception:
+                continue
