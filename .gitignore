@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pdf
+*.html
+*.zip
+captured_cookies.json
+.claude/
+.playwright-mcp/
+stitch_extracted/
+downloads/
