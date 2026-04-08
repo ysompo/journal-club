@@ -51,45 +51,46 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         if any(x in current for x in ["wayfinder", "openathens", "wayf.springernature"]):
             dismiss_cookies(page)
             time.sleep(1)
-            # If previously-used institution card is shown, click it directly
-            for sel in [
-                "button:has-text('Hebrew University of Jerusalem')",
-                "a:has-text('Hebrew University of Jerusalem')",
-                "li:has-text('Hebrew University of Jerusalem')",
-            ]:
+            # Search for institution using the wayf search box
+            for sel in ['#searchFormTextInput', 'input[name="search"]',
+                        'input[placeholder*="nstitut"]', 'input[type="search"]',
+                        'input.js-sa-institution-search', 'input[type="text"]']:
                 try:
                     page.click(sel, timeout=3000)
-                    print(f"   [Springer] Clicked previously-used institution: {sel}")
+                    page.type(sel, "Hebrew University of Jerusalem", delay=50)
+                    print(f"   [Springer] Typed institution into: {sel}")
                     time.sleep(3)
                     break
                 except Exception:
                     continue
-            else:
-                # Search for institution
-                for sel in ['input[placeholder*="nstitut"]', 'input[type="search"]',
-                            'input.js-sa-institution-search', 'input[type="text"]']:
-                    try:
-                        page.click(sel, timeout=3000)
-                        page.type(sel, "Hebrew University of Jerusalem", delay=50)
-                        time.sleep(2)
-                        break
-                    except Exception:
-                        continue
-                for sel in [
-                    "span:has-text('Hebrew University of Jerusalem')",
-                    "li:has-text('Hebrew University')",
-                    "a:has-text('Hebrew University')",
-                    "a.sa-institutionslink",
-                ]:
-                    try:
-                        page.click(sel, timeout=5000)
-                        time.sleep(2)
-                        break
-                    except Exception:
-                        continue
+            for sel in [
+                "a:has-text('Hebrew University of Jerusalem')",
+                "span:has-text('Hebrew University of Jerusalem')",
+                "li:has-text('Hebrew University')",
+                "a:has-text('Hebrew University')",
+                "a.sa-institutionslink",
+            ]:
+                try:
+                    page.click(sel, timeout=5000)
+                    print(f"   [Springer] Clicked institution: {sel}")
+                    time.sleep(3)
+                    break
+                except Exception:
+                    continue
     except Exception as e:
         print(f"   [Springer] Timeout: {e}")
-    wait_for_huji_and_login(page, email, password)
+
+    # Wait for HUJI IdP — may pass through sp.nature.com SAML relay first
+    try:
+        page.wait_for_function(
+            "() => window.location.href.includes('huji.ac.il')",
+            timeout=30_000,
+        )
+        time.sleep(1)
+        from journal_club.huji_login import login_huji
+        login_huji(page, email, password)
+    except Exception as e:
+        print(f"   [Springer] Did not reach HUJI: {e}")
     print("\n[Springer] Waiting to return to journal...")
     try:
         page.wait_for_function(
