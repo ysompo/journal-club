@@ -1,4 +1,5 @@
 # journal_club/auth_ovid.py
+import os
 import time
 from playwright.sync_api import Page
 
@@ -138,28 +139,37 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
         pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
         time.sleep(5)
     else:
-        # Fallback: click Download (opens dropdown) → PDF
-        print("   No PDF URL in DOM — clicking Download PDF button...")
-        for download_sel in [
-            "button:has-text('Download')",
-            "a:has-text('Download')",
-        ]:
-            try:
-                page.click(download_sel, timeout=5000)
-                print(f"   Clicked download toggle: {download_sel}")
-                time.sleep(1)
-                break
-            except Exception:
-                continue
+        # Use expect_download() to synchronously wait for the download
+        print("   No PDF URL in DOM — clicking Download PDF via expect_download...")
+        try:
+            # Open the Download dropdown first
+            for download_sel in ["button:has-text('Download')", "a:has-text('Download')"]:
+                try:
+                    page.click(download_sel, timeout=5000)
+                    print(f"   Clicked download toggle: {download_sel}")
+                    time.sleep(1)
+                    break
+                except Exception:
+                    continue
 
-        for pdf_sel in [
-            "button:has-text('PDF')",
-            "a:has-text('PDF')",
-            "li:has-text('PDF')",
-        ]:
-            try:
-                page.click(pdf_sel, timeout=5000)
-                print(f"   Clicked PDF: {pdf_sel}")
-                break
-            except Exception:
-                continue
+            # Now click PDF with expect_download to capture it synchronously
+            with page.expect_download(timeout=60_000) as dl_info:
+                for pdf_sel in ["button:has-text('PDF')", "a:has-text('PDF')", "li:has-text('PDF')"]:
+                    try:
+                        page.click(pdf_sel, timeout=5000)
+                        print(f"   Clicked PDF: {pdf_sel}")
+                        break
+                    except Exception:
+                        continue
+            download = dl_info.value
+            tmp = os.path.join(os.environ.get("TEMP", "C:\\Temp"), download.suggested_filename)
+            download.save_as(tmp)
+            with open(tmp, "rb") as fh:
+                body = fh.read()
+            if body[:4] == b'%PDF':
+                print(f"   [PDF via LWW download] {len(body):,} bytes")
+                captured.append(body)
+            else:
+                print(f"   Download header not PDF: {body[:8]}")
+        except Exception as e:
+            print(f"   [Ovid] Download failed: {e}")
