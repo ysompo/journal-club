@@ -21,11 +21,12 @@ _PDF_LINK_JS = """
 """
 
 def check_open_access(page: Page, context: BrowserContext,
-                      captured: list, timeout_s: int = 15) -> bool:
+                      captured: list, timeout_s: int = 15) -> tuple[bool, str | None]:
     """
     Navigate to article_url (already loaded on page), look for a direct PDF link.
     If found, open it in a new tab and wait for PDF capture.
-    Returns True if a PDF was captured.
+    Returns (True, pdf_url) if PDF captured, (False, pdf_url) if link found but blocked,
+    (False, None) if no PDF link found.
     """
     print("\n[OA Check] Scanning DOM for direct PDF link...")
 
@@ -37,7 +38,7 @@ def check_open_access(page: Page, context: BrowserContext,
 
     if not pdf_href:
         print("   [OA Check] No direct PDF link found.")
-        return False
+        return False, None
 
     print(f"   [OA Check] Found PDF link: {pdf_href[:80]}")
     pdf_tab = None
@@ -55,7 +56,7 @@ def check_open_access(page: Page, context: BrowserContext,
 
     if captured:
         print("   [OA Check] Open access confirmed — PDF captured!")
-        return True
+        return True, pdf_href
 
     # Close the tab so it doesn't interfere with the auth flow's PDF download
     if pdf_tab:
@@ -65,4 +66,4 @@ def check_open_access(page: Page, context: BrowserContext,
             pass
 
     print("   [OA Check] PDF not accessible without auth.")
-    return False
+    return False, pdf_href

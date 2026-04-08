@@ -51,7 +51,9 @@ def main():
         page.goto(article_url, wait_until="domcontentloaded")
         time.sleep(3)
 
-        if check_open_access(page, context, captured, timeout_s=20):
+        oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
+
+        if oa_ok:
             pass  # OA — PDF already captured
         else:
             # Step 2: Publisher-specific auth
@@ -73,7 +75,18 @@ def main():
             else:  # OPENATHENS_GENERIC
                 authenticate_openathens(**auth_kwargs)
 
-            wait_for_pdf(captured, timeout_s=30)
+            wait_for_pdf(captured, timeout_s=60)
+
+            # Fallback: if PDF URL was found in OA check, navigate directly to it
+            if not captured and pdf_url:
+                print(f"\n[Fallback] Navigating directly to PDF URL after auth...")
+                print(f"   {pdf_url[:80]}")
+                try:
+                    pdf_tab = context.new_page()
+                    pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+                    wait_for_pdf(captured, timeout_s=30)
+                except Exception as e:
+                    print(f"   Fallback error: {e}")
 
         print("\n" + "=" * 60)
         if save_pdf(captured, out_path):
