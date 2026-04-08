@@ -43,33 +43,51 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         page.wait_for_function(
             """() => window.location.href.includes('wayfinder') ||
                      window.location.href.includes('openathens') ||
+                     window.location.href.includes('wayf.springernature') ||
                      window.location.href.includes('huji.ac.il')""",
             timeout=30_000,
         )
-        if "wayfinder" in page.url or "openathens" in page.url:
+        current = page.url
+        print(f"   [Springer] Auth page: {current[:80]}")
+        if any(x in current for x in ["wayfinder", "openathens", "wayf.springernature"]):
             dismiss_cookies(page)
             time.sleep(1)
-            for sel in ['input[placeholder*="nstitut"]', 'input[type="search"]',
-                        'input.js-sa-institution-search', 'input[type="text"]']:
-                try:
-                    page.click(sel, timeout=3000)
-                    page.type(sel, "Hebrew University of Jerusalem", delay=50)
-                    time.sleep(2)
-                    break
-                except Exception:
-                    continue
+            # If previously-used institution card is shown, click it directly
             for sel in [
-                "span:has-text('Hebrew University of Jerusalem')",
-                "li:has-text('Hebrew University')",
-                "a:has-text('Hebrew University')",
-                "a.sa-institutionslink",
+                "button:has-text('Hebrew University of Jerusalem')",
+                "a:has-text('Hebrew University of Jerusalem')",
+                "li:has-text('Hebrew University of Jerusalem')",
             ]:
                 try:
-                    page.click(sel, timeout=5000)
-                    time.sleep(2)
+                    page.click(sel, timeout=3000)
+                    print(f"   [Springer] Clicked previously-used institution: {sel}")
+                    time.sleep(3)
                     break
                 except Exception:
                     continue
+            else:
+                # Search for institution
+                for sel in ['input[placeholder*="nstitut"]', 'input[type="search"]',
+                            'input.js-sa-institution-search', 'input[type="text"]']:
+                    try:
+                        page.click(sel, timeout=3000)
+                        page.type(sel, "Hebrew University of Jerusalem", delay=50)
+                        time.sleep(2)
+                        break
+                    except Exception:
+                        continue
+                for sel in [
+                    "span:has-text('Hebrew University of Jerusalem')",
+                    "li:has-text('Hebrew University')",
+                    "a:has-text('Hebrew University')",
+                    "a.sa-institutionslink",
+                ]:
+                    try:
+                        page.click(sel, timeout=5000)
+                        time.sleep(2)
+                        break
+                    except Exception:
+                        continue
     except Exception as e:
         print(f"   [Springer] Timeout: {e}")
     wait_for_huji_and_login(page, email, password)
@@ -78,6 +96,7 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         page.wait_for_function(
             """() => !window.location.href.includes('huji.ac.il') &&
                      !window.location.href.includes('openathens') &&
+                     !window.location.href.includes('wayf.springernature') &&
                      !window.location.href.includes('login')""",
             timeout=90_000,
         )
@@ -87,15 +106,33 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
     time.sleep(3)
     page.goto(article_url, wait_until="domcontentloaded")
     time.sleep(3)
-    for sel in [
-        "a:has-text('Download PDF')",
-        "button:has-text('Download PDF')",
-        "a[href$='.pdf']",
-        "a:has-text('PDF')",
-    ]:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   [Springer] Clicked: {sel}")
-            break
-        except Exception:
-            continue
+
+    # Extract direct PDF URL from authenticated DOM
+    print("\n[Springer] Extracting PDF URL from authenticated page...")
+    pdf_url = page.evaluate("""() => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        const pdf = links.find(a =>
+            (a.href.endsWith('.pdf') || a.href.includes('/pdf')) &&
+            (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
+        );
+        return pdf ? pdf.href : null;
+    }""")
+
+    if pdf_url:
+        print(f"   PDF URL: {pdf_url[:80]}")
+        pdf_tab = page.context.new_page()
+        pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+        time.sleep(5)
+    else:
+        for sel in [
+            "a:has-text('Download PDF')",
+            "button:has-text('Download PDF')",
+            "a[href$='.pdf']",
+            "a:has-text('PDF')",
+        ]:
+            try:
+                page.click(sel, timeout=5000)
+                print(f"   [Springer] Clicked: {sel}")
+                break
+            except Exception:
+                continue
