@@ -5,9 +5,13 @@ from playwright.sync_api import Page
 from journal_club.huji_login import wait_for_huji_and_login
 
 def _build_ovid_login_url(article_url: str) -> str:
-    """Build the Ovid direct-login URL based on the article domain."""
+    """Build the LWW/Ovid institutional login URL for the given article."""
+    from urllib.parse import quote
     if "journals.lww.com" in article_url:
-        return "https://ovidsp.ovid.com/autologin.asp?site=ovidweb.cgi&resource=journals"
+        # Convert citation URL to fulltext URL for the return target
+        ft_url = article_url.replace("/citation/", "/fulltext/")
+        encoded = quote(ft_url, safe="")
+        return f"https://login.journals.lww.com/OneID/Login.aspx?returnUrl={encoded}&Login_type=Ovid"
     return "https://ovidsp.ovid.com/autologin.asp"
 
 def _select_institution_on_wayfinder(page: Page):
