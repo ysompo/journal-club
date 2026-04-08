@@ -48,6 +48,10 @@ def check_open_access(page: Page, context: BrowserContext,
     except Exception as e:
         print(f"   [OA Check] Navigation error: {e}")
 
+    # Wait a bit longer for Chrome extension to deliver PDF bytes
+    if not captured:
+        wait_for_pdf(captured, timeout_s=timeout_s)
+
     if captured:
         print("   [OA Check] Open access confirmed — PDF captured!")
         return True

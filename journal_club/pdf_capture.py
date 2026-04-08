@@ -66,7 +66,7 @@ def save_pdf(captured: list[bytes], out_path: str) -> bool:
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(captured[0])
-    print(f"   Saved → {out_path} ({os.path.getsize(out_path):,} bytes)")
+    print(f"   Saved -> {out_path} ({os.path.getsize(out_path):,} bytes)")
     return True
 
 
