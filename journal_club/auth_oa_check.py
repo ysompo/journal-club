@@ -40,6 +40,7 @@ def check_open_access(page: Page, context: BrowserContext,
         return False
 
     print(f"   [OA Check] Found PDF link: {pdf_href[:80]}")
+    pdf_tab = None
     try:
         pdf_tab = context.new_page()
         pdf_tab.goto(pdf_href, wait_until="commit", timeout=20_000)
@@ -55,6 +56,13 @@ def check_open_access(page: Page, context: BrowserContext,
     if captured:
         print("   [OA Check] Open access confirmed — PDF captured!")
         return True
+
+    # Close the tab so it doesn't interfere with the auth flow's PDF download
+    if pdf_tab:
+        try:
+            pdf_tab.close()
+        except Exception:
+            pass
 
     print("   [OA Check] PDF not accessible without auth.")
     return False
