@@ -7,37 +7,36 @@ from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 def authenticate_springer(page: Page, article_url: str, email: str, password: str,
                            captured: list):
     """SpringerNature subscription auth flow (used only if OA check failed)."""
+    from urllib.parse import quote
     print(f"\n[Springer Auth] Article: {article_url[:60]}")
     page.goto(article_url, wait_until="domcontentloaded")
     time.sleep(3)
     dismiss_cookies(page)
-    for sel in [
-        "a:has-text('Access through your institution')",
-        "button:has-text('Access through your institution')",
-        "a:has-text('Log in via your institution')",
-        "a:has-text('Log in')",
-    ]:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   [Springer] Clicked: {sel}")
-            time.sleep(3)
-            break
-        except Exception:
-            continue
-    for sel in [
-        "a:has-text('Access through your institution')",
-        "a:has-text('institution')",
-        "a:has-text('Shibboleth')",
-        "a:has-text('OpenAthens')",
-        "[data-test='institution-login']",
-    ]:
-        try:
-            page.click(sel, timeout=3000)
-            print(f"   [Springer] Gateway click: {sel}")
-            time.sleep(3)
-            break
-        except Exception:
-            continue
+
+    # Extract the institutional access href directly from the DOM
+    # (avoids clicking the wrong "Log in" personal link)
+    inst_url = page.evaluate("""() => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        const inst = links.find(a =>
+            a.href.includes('wayf.springernature') ||
+            (a.href.includes('openathens') && a.href.includes('redirect')) ||
+            (a.innerText || a.textContent || '').trim() === 'Access through your institution'
+        );
+        return inst ? inst.href : null;
+    }""")
+
+    if inst_url:
+        print(f"   [Springer] Navigating to institution access: {inst_url[:80]}")
+        page.goto(inst_url, wait_until="domcontentloaded")
+        time.sleep(3)
+    else:
+        # Fallback: build wayf URL from article URL
+        encoded = quote(article_url, safe="")
+        wayf_url = f"https://wayf.springernature.com/?redirect_uri={encoded}"
+        print(f"   [Springer] No inst link found, navigating to wayf: {wayf_url[:80]}")
+        page.goto(wayf_url, wait_until="domcontentloaded")
+        time.sleep(3)
+
     print(f"   On: {page.url[:80]}")
     try:
         page.wait_for_function(
