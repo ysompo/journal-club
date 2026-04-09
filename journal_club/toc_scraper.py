@@ -69,6 +69,33 @@ def scrape_via_pubmed(issn: str) -> TocResult:
         r2.raise_for_status()
         result = r2.json().get("result", {})
 
+        # Fetch abstracts via efetch XML in one batch call
+        abstracts: dict[str, str] = {}
+        try:
+            r3 = requests.get(
+                f"{_EUTILS}/efetch.fcgi",
+                params={"db": "pubmed", "id": ",".join(ids), "retmode": "xml", "rettype": "abstract"},
+                headers=_PUBMED_HEADERS, timeout=_TIMEOUT,
+            )
+            r3.raise_for_status()
+            root = ET.fromstring(r3.content)
+            for article in root.iter("PubmedArticle"):
+                pmid_el = article.find(".//MedlineCitation/PMID")
+                if pmid_el is None:
+                    continue
+                pmid_val = pmid_el.text or ""
+                parts = []
+                for node in article.findall(".//Abstract/AbstractText"):
+                    label = node.get("Label")
+                    text = (node.text or "").strip()
+                    if label and text:
+                        parts.append(f"{label}: {text}")
+                    elif text:
+                        parts.append(text)
+                abstracts[pmid_val] = " ".join(parts)
+        except Exception as e:
+            print(f"   [TOC/PubMed] Abstract fetch error: {e}")
+
         articles = []
         issue_label = ""
 
@@ -81,7 +108,6 @@ def scrape_via_pubmed(issn: str) -> TocResult:
             if not title:
                 continue
 
-            journal = doc.get("source", "")
             pub_date = doc.get("pubdate", "")
             volume = doc.get("volume", "")
             issue = doc.get("issue", "")
@@ -126,7 +152,7 @@ def scrape_via_pubmed(issn: str) -> TocResult:
                 "authors": authors,
                 "article_type": article_type,
                 "doi": doi,
-                "abstract": "",
+                "abstract": abstracts.get(pmid, ""),
                 "issue_label": issue_label,
             })
 

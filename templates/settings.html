@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Settings · Journal Club{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-6 py-10">
+  <h1 class="font-headline text-2xl font-bold text-on-surface mb-1">Settings</h1>
+  <p class="text-sm text-slate-400 mb-8">Changes are saved immediately and take effect on the next download.</p>
+
+  <!-- Save status toast -->
+  <div id="toast" class="hidden fixed bottom-6 right-6 bg-green-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow-lg z-50 flex items-center gap-2">
+    <span class="material-symbols-outlined text-base">check_circle</span>
+    Settings saved
+  </div>
+
+  <!-- Download Credentials -->
+  <section class="mb-8">
+    <h2 class="font-headline text-base font-bold text-on-surface mb-1">Download credentials</h2>
+    <p class="text-xs text-slate-400 mb-4">Used to authenticate with HUJI OpenAthens when downloading PDFs.</p>
+    <div class="bg-white dark-card rounded-xl border border-slate-200 divide-y divide-slate-100">
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">Email</label>
+        <input type="email" id="huji_email" value="{{ cfg.huji_email }}"
+          placeholder="yourname@mail.huji.ac.il"
+          class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+      </div>
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">Password</label>
+        <div class="flex-1 flex gap-2">
+          <input type="password" id="huji_password" value="{{ cfg.huji_password }}"
+            placeholder="••••••••"
+            class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+          <button onclick="togglePwd('huji_password', this)"
+            class="text-slate-400 hover:text-slate-600 transition-colors">
+            <span class="material-symbols-outlined text-lg">visibility</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Email / Reading List -->
+  <section class="mb-8">
+    <h2 class="font-headline text-base font-bold text-on-surface mb-1">Email — reading list</h2>
+    <p class="text-xs text-slate-400 mb-4">Used to send the reading list with PDF attachments. For Gmail, create an <a href="https://myaccount.google.com/apppasswords" target="_blank" class="text-primary hover:underline">App Password</a>.</p>
+    <div class="bg-white dark-card rounded-xl border border-slate-200 divide-y divide-slate-100">
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">Send to</label>
+        <input type="email" id="email_to" value="{{ cfg.email_to }}"
+          placeholder="you@example.com"
+          class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+      </div>
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">SMTP host</label>
+        <input type="text" id="smtp_host" value="{{ cfg.smtp_host }}"
+          placeholder="smtp.gmail.com"
+          class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+      </div>
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">SMTP port</label>
+        <input type="number" id="smtp_port" value="{{ cfg.smtp_port }}"
+          placeholder="587"
+          class="w-24 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+      </div>
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">SMTP user</label>
+        <input type="email" id="smtp_user" value="{{ cfg.smtp_user }}"
+          placeholder="you@gmail.com"
+          class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+      </div>
+      <div class="px-5 py-4 flex items-center gap-4">
+        <label class="w-36 text-sm font-semibold text-on-surface-variant flex-shrink-0">SMTP password</label>
+        <div class="flex-1 flex gap-2">
+          <input type="password" id="smtp_password" value="{{ cfg.smtp_password }}"
+            placeholder="App password"
+            class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
+          <button onclick="togglePwd('smtp_password', this)"
+            class="text-slate-400 hover:text-slate-600 transition-colors">
+            <span class="material-symbols-outlined text-lg">visibility</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Save button -->
+  <button onclick="saveSettings()"
+    class="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-primary text-white font-semibold text-sm hover:bg-primary-container transition-colors">
+    <span class="material-symbols-outlined text-base">save</span>
+    Save settings
+  </button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePwd(id, btn) {
+  const input = document.getElementById(id);
+  const icon = btn.querySelector('.material-symbols-outlined');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.textContent = 'visibility_off';
+  } else {
+    input.type = 'password';
+    icon.textContent = 'visibility';
+  }
+}
+
+function saveSettings() {
+  const keys = ['huji_email','huji_password','email_to','smtp_host','smtp_port','smtp_user','smtp_password'];
+  const data = {};
+  keys.forEach(k => {
+    const el = document.getElementById(k);
+    if (el) data[k] = el.value;
+  });
+  fetch('/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  }).then(r => r.json()).then(d => {
+    if (d.status === 'saved') showToast();
+  });
+}
+
+function showToast() {
+  const t = document.getElementById('toast');
+  t.classList.remove('hidden');
+  t.style.display = 'flex';
+  setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
+// Auto-save on Enter
+document.querySelectorAll('input').forEach(el => {
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') saveSettings(); });
+});
+</script>
+{% endblock %}

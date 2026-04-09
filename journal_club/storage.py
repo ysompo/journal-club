@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS reading_list (
     added_at       TEXT NOT NULL,
     UNIQUE(toc_article_id)
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -329,3 +334,31 @@ def get_reading_list_ids() -> set[int]:
     with _connect() as conn:
         rows = conn.execute("SELECT toc_article_id FROM reading_list").fetchall()
     return {r["toc_article_id"] for r in rows}
+
+
+# ── Settings operations ───────────────────────────────────────────────────────
+
+_SETTINGS_KEYS = [
+    "huji_email", "huji_password",
+    "email_to", "smtp_host", "smtp_port", "smtp_user", "smtp_password",
+]
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+
+def get_all_settings() -> dict[str, str]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {r["key"]: r["value"] for r in rows}

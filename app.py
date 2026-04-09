@@ -11,7 +11,7 @@ import threading
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from journal_club.config import load_config
+from journal_club.config import Config, load_config
 from journal_club.resolver import resolve
 from journal_club.journals_catalog import CATALOG
 from journal_club.toc_scraper import scrape
@@ -20,6 +20,23 @@ import journal_club.storage as storage
 
 app = Flask(__name__)
 cfg = load_config("config.yaml")
+
+
+def get_runtime_config() -> Config:
+    """Return Config with DB settings overriding config.yaml values where set."""
+    s = storage.get_all_settings()
+    return Config(
+        huji_email=s.get("huji_email") or cfg.huji_email,
+        huji_password=s.get("huji_password") or cfg.huji_password,
+        output_dir=cfg.output_dir,
+        chrome_profile=cfg.chrome_profile,
+        chrome_path=cfg.chrome_path,
+        email_to=s.get("email_to") or cfg.email_to,
+        smtp_host=s.get("smtp_host") or cfg.smtp_host,
+        smtp_port=int(s.get("smtp_port") or cfg.smtp_port),
+        smtp_user=s.get("smtp_user") or cfg.smtp_user,
+        smtp_password=s.get("smtp_password") or cfg.smtp_password,
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,10 +124,12 @@ def download():
 
     article_id = storage.save_article(meta, pdf_path=None)
 
+    runtime_cfg = get_runtime_config()
+
     def _run():
         try:
             from download import download_article
-            _, pdf_path = download_article(meta.url, cfg)
+            _, pdf_path = download_article(meta.url, runtime_cfg)
             storage.update_pdf_path(article_id, pdf_path)
             if toc_article_id:
                 storage.link_reading_list_to_article(toc_article_id, article_id)
@@ -245,23 +264,42 @@ def reading_list_remove():
 
 @app.route("/reading-list/email", methods=["POST"])
 def reading_list_email():
-    if not cfg.email_to or not cfg.smtp_user or not cfg.smtp_password:
-        return jsonify({"error": "Email not configured in config.yaml"}), 400
+    rc = get_runtime_config()
+    if not rc.email_to or not rc.smtp_user or not rc.smtp_password:
+        return jsonify({"error": "Email not configured — go to Settings"}), 400
     items = storage.get_reading_list()
     if not items:
         return jsonify({"error": "Reading list is empty"}), 400
     try:
         attached = send_reading_list(
             articles=items,
-            to_addr=cfg.email_to,
-            smtp_host=cfg.smtp_host,
-            smtp_port=cfg.smtp_port,
-            smtp_user=cfg.smtp_user,
-            smtp_password=cfg.smtp_password,
+            to_addr=rc.email_to,
+            smtp_host=rc.smtp_host,
+            smtp_port=rc.smtp_port,
+            smtp_user=rc.smtp_user,
+            smtp_password=rc.smtp_password,
         )
         return jsonify({"status": "sent", "articles": len(items), "pdfs_attached": attached})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Settings routes ──────────────────────────────────────────────────────────
+
+@app.route("/settings")
+def settings():
+    s = storage.get_all_settings()
+    rc = get_runtime_config()
+    return render_template("settings.html", page="settings", s=s, cfg=rc)
+
+
+@app.route("/settings", methods=["POST"])
+def settings_save():
+    data = request.get_json(force=True) or {}
+    for key in storage._SETTINGS_KEYS:
+        if key in data:
+            storage.set_setting(key, data[key])
+    return jsonify({"status": "saved"})
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
