@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import yaml
 
 
@@ -9,11 +9,11 @@ class Config:
     output_dir: str
     chrome_profile: str
     chrome_path: str = ""
-    email_to: str = ""
-    smtp_host: str = "smtp.gmail.com"
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
+    resend_api_key: str = ""
+    resend_from: str = ""
+    email_to_1: str = ""
+    email_to_2: str = ""
+    email_to_3: str = ""
 
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -25,9 +25,9 @@ def load_config(path: str = "config.yaml") -> Config:
         output_dir=data["output_dir"],
         chrome_profile=data["chrome_profile"],
         chrome_path=data.get("chrome_path", ""),
-        email_to=data.get("email_to", ""),
-        smtp_host=data.get("smtp_host", "smtp.gmail.com"),
-        smtp_port=int(data.get("smtp_port", 587)),
-        smtp_user=data.get("smtp_user", ""),
-        smtp_password=data.get("smtp_password", ""),
+        resend_api_key=data.get("resend_api_key", ""),
+        resend_from=data.get("resend_from", ""),
+        email_to_1=data.get("email_to_1", ""),
+        email_to_2=data.get("email_to_2", ""),
+        email_to_3=data.get("email_to_3", ""),
     )

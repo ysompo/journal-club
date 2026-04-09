@@ -31,11 +31,11 @@ def get_runtime_config() -> Config:
         output_dir=cfg.output_dir,
         chrome_profile=cfg.chrome_profile,
         chrome_path=cfg.chrome_path,
-        email_to=s.get("email_to") or cfg.email_to,
-        smtp_host=s.get("smtp_host") or cfg.smtp_host,
-        smtp_port=int(s.get("smtp_port") or cfg.smtp_port),
-        smtp_user=s.get("smtp_user") or cfg.smtp_user,
-        smtp_password=s.get("smtp_password") or cfg.smtp_password,
+        resend_api_key=s.get("resend_api_key") or cfg.resend_api_key,
+        resend_from=s.get("resend_from") or cfg.resend_from,
+        email_to_1=s.get("email_to_1") or cfg.email_to_1,
+        email_to_2=s.get("email_to_2") or cfg.email_to_2,
+        email_to_3=s.get("email_to_3") or cfg.email_to_3,
     )
 
 
@@ -265,19 +265,20 @@ def reading_list_remove():
 @app.route("/reading-list/email", methods=["POST"])
 def reading_list_email():
     rc = get_runtime_config()
-    if not rc.email_to or not rc.smtp_user or not rc.smtp_password:
+    if not rc.resend_api_key or not rc.resend_from:
         return jsonify({"error": "Email not configured — go to Settings"}), 400
+    to_addrs = [a for a in [rc.email_to_1, rc.email_to_2, rc.email_to_3] if a]
+    if not to_addrs:
+        return jsonify({"error": "No recipient addresses configured — go to Settings"}), 400
     items = storage.get_reading_list()
     if not items:
         return jsonify({"error": "Reading list is empty"}), 400
     try:
         attached = send_reading_list(
             articles=items,
-            to_addr=rc.email_to,
-            smtp_host=rc.smtp_host,
-            smtp_port=rc.smtp_port,
-            smtp_user=rc.smtp_user,
-            smtp_password=rc.smtp_password,
+            api_key=rc.resend_api_key,
+            from_addr=rc.resend_from,
+            to_addrs=to_addrs,
         )
         return jsonify({"status": "sent", "articles": len(items), "pdfs_attached": attached})
     except Exception as e:

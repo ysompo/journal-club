@@ -340,7 +340,8 @@ def get_reading_list_ids() -> set[int]:
 
 _SETTINGS_KEYS = [
     "huji_email", "huji_password",
-    "email_to", "smtp_host", "smtp_port", "smtp_user", "smtp_password",
+    "resend_api_key", "resend_from",
+    "email_to_1", "email_to_2", "email_to_3",
 ]
 
 
