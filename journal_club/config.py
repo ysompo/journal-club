@@ -8,7 +8,12 @@ class Config:
     huji_password: str
     output_dir: str
     chrome_profile: str
-    chrome_path: str = ""   # optional override; auto-detected if empty
+    chrome_path: str = ""
+    email_to: str = ""
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
 
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -20,4 +25,9 @@ def load_config(path: str = "config.yaml") -> Config:
         output_dir=data["output_dir"],
         chrome_profile=data["chrome_profile"],
         chrome_path=data.get("chrome_path", ""),
+        email_to=data.get("email_to", ""),
+        smtp_host=data.get("smtp_host", "smtp.gmail.com"),
+        smtp_port=int(data.get("smtp_port", 587)),
+        smtp_user=data.get("smtp_user", ""),
+        smtp_password=data.get("smtp_password", ""),
     )

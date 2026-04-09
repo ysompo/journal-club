@@ -4,3 +4,10 @@ huji_password: "136Fellsway"
 output_dir: "C:\\Users\\ysomp\\OneDrive\\Documents\\Journal Club\\downloads"
 chrome_profile: "C:\\Temp\\chrome-journal-club"
 # chrome_path: ""   # leave empty to auto-detect
+
+# Email — Reading List
+email_to: ""          # address to send reading list to
+smtp_host: smtp.gmail.com
+smtp_port: 587
+smtp_user: ""         # Gmail address (use an App Password, not account password)
+smtp_password: ""     # Gmail App Password
