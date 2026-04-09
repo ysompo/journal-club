@@ -66,6 +66,12 @@
         <span class="material-symbols-outlined {% if page == 'add' %}fill-icon{% endif %}">add_circle</span>
         <span>Add Article</span>
       </a>
+      <a href="/journals"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'journals' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'journals' %}fill-icon{% endif %}">library_books</span>
+        <span>Journals</span>
+      </a>
       <a href="/history"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'history' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
