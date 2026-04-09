@@ -28,6 +28,15 @@ _RULES: list[tuple[list[str], Publisher]] = [
 ]
 
 def detect_publisher(url: str) -> Publisher:
+    # doi.org redirect URLs — resolve by DOI prefix before checking domain rules
+    if "doi.org/" in url:
+        if any(p in url for p in ["10.1016/", "10.1053/", "10.1016"]):
+            return Publisher.ELSEVIER
+        if "10.1001/" in url:
+            return Publisher.JAMA
+        if any(p in url for p in ["10.1007/", "10.1038/"]):
+            return Publisher.SPRINGER_NATURE
+
     for domains, publisher in _RULES:
         if any(d in url for d in domains):
             return publisher
