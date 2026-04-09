@@ -31,7 +31,7 @@ def _refresh_journal(journal: dict) -> None:
             (e.publisher for e in CATALOG if e.toc_url == journal["toc_url"]),
             "generic",
         )
-        result = scrape(publisher, journal["toc_url"])
+        result = scrape(publisher, journal["toc_url"], issn=journal.get("issn"))
         old_label = journal.get("current_issue_label", "")
         is_new = bool(result.issue_label and result.issue_label != old_label)
         storage.update_journal_toc(journal["id"], result.issue_label, result.articles, is_new)
@@ -176,6 +176,19 @@ def journals_add():
     j = storage.get_journal(journal_id)
     threading.Thread(target=_refresh_journal, args=(j,), daemon=True).start()
     return jsonify({"journal_id": journal_id, "name": name})
+
+
+@app.route("/journals/<int:journal_id>/status")
+def journals_status(journal_id: int):
+    j = storage.get_journal(journal_id)
+    if j is None:
+        return jsonify({"error": "not found"}), 404
+    articles = storage.get_toc_articles(journal_id)
+    return jsonify({
+        "last_checked": j.get("last_checked"),
+        "article_count": len(articles),
+        "current_issue_label": j.get("current_issue_label", ""),
+    })
 
 
 @app.route("/journals/<int:journal_id>/refresh", methods=["POST"])

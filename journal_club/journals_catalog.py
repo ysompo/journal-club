@@ -106,4 +106,16 @@ CATALOG: list[CatalogEntry] = [
         toc_url="https://jamanetwork.com/journals/jamainternalmedicine/issue/current",
         issn="2168-6106",
     ),
+    CatalogEntry(
+        name="American Journal of Obstetrics and Gynecology",
+        publisher="elsevier",
+        toc_url="https://www.ajog.org/current",
+        issn="0002-9378",
+    ),
+    CatalogEntry(
+        name="New England Journal of Medicine: Evidence",
+        publisher="nejm",
+        toc_url="https://evidence.nejm.org/toc/evid/current",
+        issn="2766-5526",
+    ),
 ]

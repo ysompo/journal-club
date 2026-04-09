@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import requests
@@ -22,7 +23,9 @@ _HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     )
 }
+_PUBMED_HEADERS = {"User-Agent": "JournalClubDownloader/1.0 (mailto:research@example.com)"}
 _TIMEOUT = 20
+_EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 
 @dataclass
@@ -32,21 +35,127 @@ class TocResult:
     # Each article dict has keys: url, title, authors (list), article_type, doi, abstract
 
 
-def scrape(publisher: str, toc_url: str) -> TocResult:
+def scrape_via_pubmed(issn: str) -> TocResult:
+    """
+    Fetch the most recent issue of a journal by ISSN using PubMed eutils.
+    Works for any journal indexed in PubMed, including Elsevier journals that
+    block HTML scraping (AJOG, Lancet, ScienceDirect etc.)
+    """
+    try:
+        # Search for the 40 most recent articles from this journal
+        r = requests.get(
+            f"{_EUTILS}/esearch.fcgi",
+            params={
+                "db": "pubmed",
+                "term": f"{issn}[ISSN]",
+                "sort": "pub date",
+                "retmax": 40,
+                "retmode": "json",
+            },
+            headers=_PUBMED_HEADERS, timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        ids = r.json().get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            print(f"   [TOC/PubMed] No results for ISSN {issn}")
+            return TocResult(issue_label="")
+
+        # Fetch summaries for all IDs in one call
+        r2 = requests.get(
+            f"{_EUTILS}/esummary.fcgi",
+            params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+            headers=_PUBMED_HEADERS, timeout=_TIMEOUT,
+        )
+        r2.raise_for_status()
+        result = r2.json().get("result", {})
+
+        articles = []
+        issue_label = ""
+
+        for pmid in ids:
+            doc = result.get(pmid, {})
+            if not doc or doc.get("error"):
+                continue
+
+            title = doc.get("title", "").rstrip(".")
+            if not title:
+                continue
+
+            journal = doc.get("source", "")
+            pub_date = doc.get("pubdate", "")
+            volume = doc.get("volume", "")
+            issue = doc.get("issue", "")
+
+            # Build issue label from the first article
+            if not issue_label and (volume or issue):
+                parts = []
+                if volume:
+                    parts.append(f"Vol {volume}")
+                if issue:
+                    parts.append(f"Issue {issue}")
+                if pub_date:
+                    parts.append(pub_date)
+                issue_label = " · ".join(parts)
+
+            # DOI
+            doi = None
+            for aid in doc.get("articleids", []):
+                if aid.get("idtype") == "doi":
+                    doi = aid["value"]
+                    break
+
+            # Publisher URL from DOI
+            from journal_club.resolver import _doi_to_url
+            url = _doi_to_url(doi) if doi else f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+
+            authors = [
+                a["name"] for a in doc.get("authors", [])
+                if a.get("authtype") == "Author"
+            ]
+
+            pub_types = doc.get("pubtype", [])
+            # pubtype can be a list of strings OR a list of dicts with "value" key
+            if pub_types and isinstance(pub_types[0], dict):
+                article_type = pub_types[0].get("value", "")
+            else:
+                article_type = pub_types[0] if pub_types else ""
+
+            articles.append({
+                "url": url,
+                "title": title,
+                "authors": authors,
+                "article_type": article_type,
+                "doi": doi,
+                "abstract": "",
+                "issue_label": issue_label,
+            })
+
+        print(f"   [TOC/PubMed] ISSN {issn}: {len(articles)} articles, label='{issue_label}'")
+        return TocResult(issue_label=issue_label, articles=articles)
+
+    except Exception as e:
+        print(f"   [TOC/PubMed] Error for ISSN {issn}: {e}")
+        return TocResult(issue_label="")
+
+
+def scrape(publisher: str, toc_url: str, issn: str | None = None) -> TocResult:
     """
     Fetch and parse a journal's current-issue TOC.
-    publisher must match one of the CatalogEntry.publisher values.
-    Returns an empty TocResult on HTTP errors rather than raising,
-    so a single failed journal doesn't break a batch refresh.
+    Tries HTML scraping first; if that returns 0 articles and an ISSN is
+    provided, falls back to PubMed eutils (works for any indexed journal).
     """
     try:
         r = requests.get(toc_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
         r.raise_for_status()
     except requests.HTTPError as e:
-        print(f"   [TOC] HTTP {e.response.status_code} for {toc_url} — skipping")
+        print(f"   [TOC] HTTP {e.response.status_code} for {toc_url} — trying PubMed fallback")
+        if issn:
+            return scrape_via_pubmed(issn)
         return TocResult(issue_label="")
     except requests.RequestException as e:
-        print(f"   [TOC] Network error for {toc_url}: {e} — skipping")
+        print(f"   [TOC] Network error for {toc_url}: {e} — trying PubMed fallback")
+        if issn:
+            return scrape_via_pubmed(issn)
         return TocResult(issue_label="")
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -66,7 +175,14 @@ def scrape(publisher: str, toc_url: str) -> TocResult:
     }
 
     parser = parsers.get(publisher, _parse_generic)
-    return parser(soup, toc_url)
+    result = parser(soup, toc_url)
+
+    # If HTML scraping yielded nothing and we have an ISSN, fall back to PubMed
+    if not result.articles and issn:
+        print(f"   [TOC] HTML parse returned 0 articles — trying PubMed fallback (ISSN {issn})")
+        return scrape_via_pubmed(issn)
+
+    return result
 
 
 # ── NEJM ──────────────────────────────────────────────────────────────────────
