@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title or 'Article' }} — Journal Club{% endblock %}
+
+{% block content %}
+<div class="px-8 py-8 max-w-3xl">
+
+  <!-- Back -->
+  <a href="/history" class="inline-flex items-center gap-1 text-sm text-on-surface-variant hover:text-primary mb-6 font-semibold transition-colors">
+    <span class="material-symbols-outlined text-base">arrow_back</span> Back to History
+  </a>
+
+  <!-- Top action bar -->
+  <div class="flex items-center gap-3 mb-8">
+    <button id="bookmark-btn"
+            class="flex items-center gap-2 px-4 py-2 border rounded font-body font-semibold text-sm transition-colors
+                   {% if article.is_bookmarked %}bg-primary/10 border-primary text-primary{% else %}border-slate-200 text-on-surface-variant hover:border-primary hover:text-primary{% endif %}"
+            data-id="{{ article.id }}" data-bookmarked="{{ 'true' if article.is_bookmarked else 'false' }}">
+      <span class="material-symbols-outlined text-base {% if article.is_bookmarked %}fill-icon{% endif %}">bookmark</span>
+      {{ 'Bookmarked' if article.is_bookmarked else 'Bookmark' }}
+    </button>
+
+    {% if article.pdf_path %}
+    <a href="{{ article.url }}" target="_blank"
+       class="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded font-body font-semibold text-sm hover:bg-primary-container transition-colors">
+      <span class="material-symbols-outlined text-base">picture_as_pdf</span> Open PDF
+    </a>
+    {% else %}
+    <span class="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded font-body font-semibold text-sm">
+      <span class="material-symbols-outlined text-base">pending</span> Download in progress…
+    </span>
+    {% endif %}
+
+    <a href="{{ article.url }}" target="_blank"
+       class="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded font-body font-semibold text-sm text-on-surface-variant hover:border-primary hover:text-primary transition-colors">
+      <span class="material-symbols-outlined text-base">open_in_new</span> Publisher page
+    </a>
+  </div>
+
+  <!-- Article type badge -->
+  <div class="flex gap-2 mb-4">
+    {% if article.pmid %}
+    <span class="bg-surface-container-high px-2 py-0.5 text-[10px] font-label font-bold text-on-surface-variant tracking-wider uppercase rounded-sm">PubMed</span>
+    {% endif %}
+    {% if article.doi %}
+    <span class="bg-surface-container px-2 py-0.5 text-[10px] font-label font-bold text-on-surface-variant tracking-wider uppercase rounded-sm">{{ article.doi }}</span>
+    {% endif %}
+  </div>
+
+  <!-- Title -->
+  <h1 class="font-headline text-2xl text-on-surface leading-snug mb-4">
+    {{ article.title or article.url }}
+  </h1>
+
+  <!-- Authors -->
+  {% if article.authors %}
+  <p class="text-sm text-on-surface-variant mb-1">
+    {{ article.authors | join(', ') }}
+  </p>
+  {% endif %}
+
+  <!-- Journal + date -->
+  {% if article.journal or article.pub_date %}
+  <p class="text-xs text-on-surface-variant font-label tracking-widest uppercase mb-6">
+    {{ article.journal }}{% if article.journal and article.pub_date %} &middot; {% endif %}{{ article.pub_date }}
+  </p>
+  {% endif %}
+
+  <hr class="border-slate-100 mb-6"/>
+
+  <!-- Abstract -->
+  {% if article.abstract %}
+  <section class="mb-8">
+    <h2 class="font-headline text-base font-bold text-on-surface mb-3">Abstract</h2>
+    <div class="text-sm leading-relaxed text-on-surface-variant space-y-2">
+      {% for para in article.abstract.split('  ') %}
+        {% if para.strip() %}
+        <p>{{ para.strip() }}</p>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Download info -->
+  <section class="bg-surface-container-low rounded-lg p-4 text-xs text-on-surface-variant font-label">
+    <div class="flex items-center gap-2 mb-1">
+      <span class="material-symbols-outlined text-sm">info</span>
+      <span class="font-semibold uppercase tracking-wider">Download info</span>
+    </div>
+    <p>Downloaded: {{ article.downloaded_at[:10] if article.downloaded_at else 'Unknown' }}</p>
+    {% if article.pdf_path %}
+    <p class="mt-1 break-all">Path: {{ article.pdf_path }}</p>
+    {% endif %}
+    {% if article.pmid %}
+    <p class="mt-1">
+      <a href="https://pubmed.ncbi.nlm.nih.gov/{{ article.pmid }}/" target="_blank"
+         class="text-primary hover:underline">PubMed: {{ article.pmid }}</a>
+    </p>
+    {% endif %}
+  </section>
+
+</div>
+
+<script>
+  const btn = document.getElementById('bookmark-btn');
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    const res = await fetch('/bookmark/' + id, {method: 'POST'});
+    const data = await res.json();
+    btn.dataset.bookmarked = data.bookmarked ? 'true' : 'false';
+    const icon = btn.querySelector('.material-symbols-outlined');
+    if (data.bookmarked) {
+      btn.classList.add('bg-primary/10', 'border-primary', 'text-primary');
+      btn.classList.remove('border-slate-200', 'text-on-surface-variant');
+      icon.classList.add('fill-icon');
+      btn.lastChild.textContent = ' Bookmarked';
+    } else {
+      btn.classList.remove('bg-primary/10', 'border-primary', 'text-primary');
+      btn.classList.add('border-slate-200', 'text-on-surface-variant');
+      icon.classList.remove('fill-icon');
+      btn.lastChild.textContent = ' Bookmark';
+    }
+  });
+</script>
+{% endblock %}

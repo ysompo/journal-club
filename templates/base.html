@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}Journal Club{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&family=Inter:wght@400;600&family=Work+Sans:wght@500&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary:                    '#005977',
+            'primary-container':        '#007398',
+            'on-primary':               '#ffffff',
+            'on-primary-container':     '#ffffff',
+            'secondary':                '#9f4200',
+            'secondary-fixed':          '#ffdbcb',
+            'on-secondary-fixed-variant':'#5c1f00',
+            'surface-container-low':    '#f3f3f6',
+            'surface-container':        '#e9e9ec',
+            'surface-container-high':   '#dcdcdf',
+            'surface-container-highest':'#d0d0d3',
+            'on-surface':               '#191c1e',
+            'on-surface-variant':       '#41484d',
+            'outline':                  '#71787e',
+          },
+          fontFamily: {
+            headline: ['"Noto Serif"', 'serif'],
+            body:     ['Inter', 'sans-serif'],
+            label:    ['"Work Sans"', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
+    .fill-icon { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+    body { font-family: 'Inter', sans-serif; background: #f9f9fb; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen text-on-surface">
+
+  <!-- Sidebar -->
+  <aside class="h-full w-64 fixed left-0 top-0 pt-6 pb-8 px-3 flex flex-col gap-4 bg-slate-50 border-r border-slate-200 z-40">
+    <!-- Logo -->
+    <div class="px-3 mb-2">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-primary rounded flex items-center justify-center text-white font-headline font-bold text-sm">JC</div>
+        <div>
+          <h3 class="font-headline text-sm font-bold text-primary leading-tight">Journal Club</h3>
+          <p class="text-[10px] text-slate-400 font-label tracking-wider uppercase">HUJI · PDF Library</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="space-y-1 flex-1">
+      <a href="/history"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'history' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'history' %}fill-icon{% endif %}">history</span>
+        <span>History</span>
+      </a>
+      <a href="/bookmarks"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'bookmarks' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'bookmarks' %}fill-icon{% endif %}">bookmark</span>
+        <span>Bookmarks</span>
+      </a>
+    </nav>
+
+    <!-- Download form -->
+    <div class="px-1">
+      <p class="text-[10px] text-slate-400 font-label tracking-wider uppercase mb-2 px-2">Add Article</p>
+      <form id="download-form" class="flex flex-col gap-2">
+        <input id="download-input" type="text"
+               placeholder="PMID, DOI, or URL"
+               class="w-full border border-slate-200 rounded px-3 py-2 text-sm font-body focus:outline-none focus:border-primary"/>
+        <button type="submit"
+                class="w-full bg-primary text-white py-2 px-3 font-body font-semibold text-sm rounded hover:bg-primary-container transition-colors flex items-center justify-center gap-2">
+          <span class="material-symbols-outlined text-base">download</span>
+          <span id="download-btn-text">Download PDF</span>
+        </button>
+      </form>
+      <div id="download-status" class="mt-2 text-xs text-slate-500 hidden"></div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="ml-64 min-h-screen">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    const form = document.getElementById('download-form');
+    const input = document.getElementById('download-input');
+    const btnText = document.getElementById('download-btn-text');
+    const status = document.getElementById('download-status');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const val = input.value.trim();
+      if (!val) return;
+
+      btnText.textContent = 'Resolving…';
+      status.textContent = '';
+      status.classList.remove('hidden');
+
+      try {
+        const res = await fetch('/download', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({input: val}),
+        });
+        const data = await res.json();
+        if (data.error) {
+          status.textContent = 'Error: ' + data.error;
+          status.classList.add('text-red-500');
+        } else {
+          status.textContent = 'Downloading: ' + (data.title || data.url).slice(0, 50) + '…';
+          input.value = '';
+          // Poll until pdf_path is set
+          const poll = setInterval(async () => {
+            const r2 = await fetch('/article/' + data.article_id, {headers: {Accept: 'application/json'}});
+            const a = await r2.json();
+            if (a.pdf_path) {
+              clearInterval(poll);
+              status.textContent = 'Done! Reloading…';
+              setTimeout(() => location.reload(), 800);
+            }
+          }, 3000);
+        }
+      } catch (err) {
+        status.textContent = 'Network error';
+      } finally {
+        btnText.textContent = 'Download PDF';
+      }
+    });
+  </script>
+</body>
+</html>

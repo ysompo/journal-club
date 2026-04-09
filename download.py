@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """
 Journal Club PDF Downloader
-Usage: python download.py <article_url>
+Usage:
+    python download.py <article_url>
+    python download.py <pmid>
+    python download.py https://pubmed.ncbi.nlm.nih.gov/<pmid>/
+    python download.py 10.1056/NEJMoa2504068   (DOI)
 """
 import sys
 import os
 import time
 import re
 
-from journal_club.config import load_config
+from journal_club.config import load_config, Config
 from journal_club.browser import launch_browser
 from journal_club.pdf_capture import attach_pdf_hooks, save_pdf, wait_for_pdf
 from journal_club.auth_oa_check import check_open_access
 from journal_club.router import detect_publisher, Publisher
+from journal_club.resolver import resolve, ArticleMetadata
+import journal_club.storage as storage
 
 from journal_club.auth_jama import authenticate_jama
 from journal_club.auth_ovid import authenticate_ovid
@@ -22,43 +28,45 @@ from journal_club.auth_springer import authenticate_springer
 
 
 def slugify(url: str) -> str:
-    """Turn a URL into a safe filename."""
+    """Turn a URL into a safe filename (max 80 chars)."""
     slug = re.sub(r'[^a-zA-Z0-9_-]', '_', url.split("//")[-1])
     return slug[:80]
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python download.py <article_url>")
-        sys.exit(1)
+def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]:
+    """
+    Resolve *input_str* (PMID / PubMed URL / DOI / article URL), authenticate,
+    download the PDF, save it to disk, and return (metadata, pdf_path).
 
-    article_url = sys.argv[1]
-    cfg = load_config("config.yaml")
+    Raises RuntimeError if the PDF could not be captured.
+    """
+    # ── 1. Resolve input → ArticleMetadata + publisher URL ───────────────────
+    meta = resolve(input_str)
+    article_url = meta.url
 
     os.makedirs(cfg.output_dir, exist_ok=True)
     out_path = os.path.join(cfg.output_dir, slugify(article_url) + ".pdf")
 
     publisher = detect_publisher(article_url)
     print(f"\nArticle: {article_url}")
+    if meta.title:
+        print(f"Title:   {meta.title[:80]}")
     print(f"Publisher: {publisher.name}")
     print(f"Output: {out_path}")
     print("=" * 60)
 
     captured = []
 
+    # ── 2. Browser session ────────────────────────────────────────────────────
     with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
         captured = attach_pdf_hooks(context, page)
 
-        # Step 1: Navigate to article + try open access
         page.goto(article_url, wait_until="domcontentloaded")
         time.sleep(3)
 
         oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
 
-        if oa_ok:
-            pass  # OA — PDF already captured
-        else:
-            # Step 2: Publisher-specific auth
+        if not oa_ok:
             auth_kwargs = dict(
                 page=page,
                 article_url=article_url,
@@ -80,10 +88,9 @@ def main():
 
             wait_for_pdf(captured, timeout_s=60)
 
-            # Fallback: use PDF URL from OA check or from auth function
             fallback_url = pdf_url or auth_pdf_url
             if not captured and fallback_url:
-                pdf_url = fallback_url  # update for consistent logging
+                pdf_url = fallback_url
             if not captured and pdf_url:
                 print(f"\n[Fallback] Navigating directly to PDF URL after auth...")
                 print(f"   {pdf_url[:80]}")
@@ -99,16 +106,33 @@ def main():
         except EOFError:
             pass
 
-    # Save AFTER browser closes — Chrome extension may fire bytes during shutdown
+    # ── 3. Save PDF ───────────────────────────────────────────────────────────
+    # Called AFTER browser closes so Chrome extension bytes fired during
+    # shutdown are not missed.
     print("\n" + "=" * 60)
-    if save_pdf(captured, out_path):
-        size = os.path.getsize(out_path)
-        if size < 10_000:
-            print(f"WARNING: file is only {size} bytes — may not be a full PDF")
-        else:
-            print(f"SUCCESS: {out_path} ({size:,} bytes)")
+    if not save_pdf(captured, out_path):
+        raise RuntimeError("PDF not captured — see output above")
+
+    size = os.path.getsize(out_path)
+    if size < 10_000:
+        print(f"WARNING: file is only {size} bytes — may not be a full PDF")
     else:
-        print("FAILED: PDF not captured — see output above")
+        print(f"SUCCESS: {out_path} ({size:,} bytes)")
+
+    return meta, out_path
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python download.py <article_url | pmid | doi | pubmed_url>")
+        sys.exit(1)
+
+    cfg = load_config("config.yaml")
+    try:
+        meta, pdf_path = download_article(sys.argv[1], cfg)
+        storage.save_article(meta, pdf_path)
+    except RuntimeError as e:
+        print(f"FAILED: {e}")
         sys.exit(1)
 
 
