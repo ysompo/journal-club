@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+{% block title %}Journals · Journal Club{% endblock %}
+
+{% block content %}
+<div class="flex h-screen overflow-hidden">
+
+  <!-- LEFT PANEL: followed journals list -->
+  <aside class="w-72 flex-shrink-0 border-r border-slate-200 bg-slate-50 flex flex-col overflow-hidden">
+    <div class="px-4 pt-6 pb-3 border-b border-slate-200">
+      <h2 class="font-headline text-base font-bold text-primary">Following</h2>
+      <p class="text-xs text-slate-400 mt-0.5">{{ followed|length }} journal{{ 's' if followed|length != 1 }}</p>
+    </div>
+
+    <!-- Journal list -->
+    <ul class="flex-1 overflow-y-auto py-2" id="journal-list">
+      {% for j in followed %}
+      <li>
+        <button
+          onclick="selectJournal({{ j.id }})"
+          class="journal-btn w-full text-left px-4 py-3 flex items-center gap-2 hover:bg-slate-100 transition-colors
+                 {% if j.id == selected_id %}bg-primary/10 border-l-2 border-primary{% else %}border-l-2 border-transparent{% endif %}"
+          data-id="{{ j.id }}">
+          {% if j.has_new_issue %}
+          <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" title="New issue"></span>
+          {% else %}
+          <span class="w-2 h-2 rounded-full bg-transparent flex-shrink-0"></span>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold text-sm text-on-surface truncate">{{ j.name }}</div>
+            {% if j.current_issue_label %}
+            <div class="text-xs text-slate-400 truncate">{{ j.current_issue_label }}</div>
+            {% elif j.last_checked %}
+            <div class="text-xs text-slate-400">Checking…</div>
+            {% else %}
+            <div class="text-xs text-slate-400">Never checked</div>
+            {% endif %}
+          </div>
+          <button
+            onclick="event.stopPropagation(); removeJournal({{ j.id }}, this)"
+            class="text-slate-300 hover:text-red-400 transition-colors ml-1"
+            title="Unfollow">
+            <span class="material-symbols-outlined text-base">close</span>
+          </button>
+        </button>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <!-- Add journal button -->
+    <div class="p-3 border-t border-slate-200">
+      <button onclick="openAddModal()"
+        class="w-full flex items-center justify-center gap-2 py-2 rounded bg-primary text-white text-sm font-semibold hover:bg-primary-container transition-colors">
+        <span class="material-symbols-outlined text-base">add</span>
+        Add journal
+      </button>
+    </div>
+  </aside>
+
+  <!-- RIGHT PANEL: TOC -->
+  <div class="flex-1 overflow-y-auto">
+    {% if selected_journal %}
+    <div class="px-6 pt-6 pb-3 flex items-start justify-between border-b border-slate-200 sticky top-0 bg-white z-10">
+      <div>
+        <h1 class="font-headline text-lg font-bold text-on-surface">{{ selected_journal.name }}</h1>
+        <p class="text-sm text-slate-400 mt-0.5">{{ selected_journal.current_issue_label or 'Fetching current issue…' }}</p>
+      </div>
+      <div class="flex items-center gap-2 mt-1">
+        <!-- Reading list email button -->
+        <button onclick="emailReadingList()"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded border border-primary text-primary text-sm font-semibold hover:bg-primary/5 transition-colors"
+          id="email-btn">
+          <span class="material-symbols-outlined text-base">mail</span>
+          Email reading list
+        </button>
+        <!-- Refresh button -->
+        <button onclick="refreshJournal({{ selected_journal.id }})"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-200 text-slate-500 text-sm font-semibold hover:bg-slate-50 transition-colors"
+          id="refresh-btn">
+          <span class="material-symbols-outlined text-base" id="refresh-icon">refresh</span>
+          Refresh now
+        </button>
+      </div>
+    </div>
+
+    <!-- TOC article list -->
+    <div class="px-6 py-4 space-y-2" id="toc-list">
+      {% for a in toc_articles %}
+      {% set in_rl = a.id in reading_list_ids %}
+      <div class="toc-article border border-slate-200 rounded-lg bg-white" data-id="{{ a.id }}">
+        <!-- Collapsed row -->
+        <div class="px-4 py-3 flex items-start gap-3 cursor-pointer hover:bg-slate-50 transition-colors"
+             onclick="toggleArticle(this)">
+          <div class="flex-1 min-w-0">
+            {% if a.article_type %}
+            <div class="mb-0.5">
+              <span class="text-xs font-label font-medium text-secondary uppercase tracking-wide">{{ a.article_type }}</span>
+            </div>
+            {% endif %}
+            <p class="font-semibold text-sm text-on-surface leading-snug">{{ a.title }}</p>
+            {% if a.authors %}
+            <p class="text-xs text-slate-400 mt-0.5">
+              {{ a.authors[:3] | join(', ') }}{% if a.authors | length > 3 %} et al.{% endif %}
+            </p>
+            {% endif %}
+          </div>
+          <div class="flex items-center gap-2 flex-shrink-0 mt-0.5">
+            <!-- Reading list toggle -->
+            <button onclick="event.stopPropagation(); toggleReadingList({{ a.id }}, this)"
+              class="rl-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold border transition-colors
+                     {% if in_rl %}bg-primary/10 text-primary border-primary/30{% else %}border-slate-200 text-slate-500 hover:border-primary hover:text-primary{% endif %}"
+              data-in-rl="{{ 'true' if in_rl else 'false' }}"
+              title="{% if in_rl %}Remove from reading list{% else %}Add to reading list{% endif %}">
+              <span class="material-symbols-outlined text-sm">{% if in_rl %}mark_email_read{% else %}mail{% endif %}</span>
+              {% if in_rl %}In list{% else %}Reading list{% endif %}
+            </button>
+            <!-- PDF download -->
+            <button onclick="event.stopPropagation(); downloadPdf('{{ a.url }}', {{ a.id }}, this)"
+              class="pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-primary text-white hover:bg-primary-container transition-colors">
+              <span class="material-symbols-outlined text-sm">download</span>
+              PDF
+            </button>
+          </div>
+        </div>
+        <!-- Expanded: abstract -->
+        <div class="article-detail hidden px-4 pb-4">
+          {% if a.abstract %}
+          <p class="text-sm text-on-surface-variant leading-relaxed border-t border-slate-100 pt-3">{{ a.abstract }}</p>
+          {% else %}
+          <p class="text-sm text-slate-400 italic border-t border-slate-100 pt-3">No abstract available.</p>
+          {% endif %}
+          <a href="{{ a.url }}" target="_blank"
+             class="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline">
+            <span class="material-symbols-outlined text-sm">open_in_new</span>
+            Open article page
+          </a>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center py-16 text-slate-400">
+        <span class="material-symbols-outlined text-4xl block mb-2">article</span>
+        <p class="text-sm">No articles yet — click <strong>Refresh now</strong> to fetch the current issue.</p>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% else %}
+    <div class="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
+      <span class="material-symbols-outlined text-5xl">library_books</span>
+      <p class="text-base font-semibold">No journals followed yet</p>
+      <p class="text-sm">Click "Add journal" to get started.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Add Journal Modal -->
+<div id="add-modal" class="fixed inset-0 bg-black/40 z-50 hidden items-center justify-center" style="display:none">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+    <div class="px-6 pt-5 pb-4 border-b border-slate-200 flex items-center justify-between">
+      <h3 class="font-headline font-bold text-base text-on-surface">Add a Journal</h3>
+      <button onclick="closeAddModal()" class="text-slate-400 hover:text-slate-600">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="px-6 py-4">
+      <!-- Search catalog -->
+      <input type="text" id="catalog-search" placeholder="Search journals…"
+        oninput="filterCatalog(this.value)"
+        class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-primary mb-3">
+      <ul id="catalog-list" class="space-y-1 max-h-60 overflow-y-auto">
+        {% for e in catalog %}
+        <li class="catalog-item flex items-center justify-between px-3 py-2 rounded hover:bg-slate-50"
+            data-name="{{ e.name | lower }}">
+          <div>
+            <div class="text-sm font-semibold text-on-surface">{{ e.name }}</div>
+            <div class="text-xs text-slate-400">{{ e.publisher }}</div>
+          </div>
+          <button onclick="followCatalog('{{ e.name | replace("'", "\\'") }}','{{ e.publisher }}','{{ e.toc_url }}','{{ e.issn or "" }}')"
+            class="text-xs font-semibold text-primary hover:underline flex-shrink-0 ml-2">Follow</button>
+        </li>
+        {% endfor %}
+        {% if not catalog %}
+        <li class="text-sm text-slate-400 px-3 py-2">All journals from the catalog are already followed.</li>
+        {% endif %}
+      </ul>
+
+      <!-- Custom URL fallback -->
+      <div class="mt-4 pt-4 border-t border-slate-200">
+        <p class="text-xs text-slate-400 mb-2">Not listed? Paste the journal's "current issue" page URL:</p>
+        <div class="flex gap-2 mb-2">
+          <input type="text" id="custom-name" placeholder="Journal name"
+            class="w-36 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-primary">
+          <input type="text" id="custom-url" placeholder="https://journal.example.com/current"
+            class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-primary">
+        </div>
+        <button onclick="followCustom()"
+          class="w-full py-2 rounded bg-primary text-white text-sm font-semibold hover:bg-primary-container transition-colors">
+          Follow this URL
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SELECTED_ID = {{ selected_id or 'null' }};
+
+// ── Expand/collapse article row ───────────────────────────────────────────────
+function toggleArticle(header) {
+  const detail = header.nextElementSibling;
+  detail.classList.toggle('hidden');
+}
+
+// ── Select a journal (reload page with ?selected=) ────────────────────────────
+function selectJournal(id) {
+  window.location = '/journals?selected=' + id;
+}
+
+// ── Refresh journal TOC ───────────────────────────────────────────────────────
+function refreshJournal(id) {
+  const btn = document.getElementById('refresh-btn');
+  const icon = document.getElementById('refresh-icon');
+  btn.disabled = true;
+  icon.style.animation = 'spin 1s linear infinite';
+  fetch('/journals/' + id + '/refresh', {method: 'POST'})
+    .then(() => {
+      setTimeout(() => window.location.reload(), 8000);
+    })
+    .catch(e => { console.error(e); btn.disabled = false; });
+}
+
+// ── Toggle reading list ───────────────────────────────────────────────────────
+function toggleReadingList(tocArticleId, btn) {
+  const inRL = btn.dataset.inRl === 'true';
+  const url = inRL ? '/reading-list/remove' : '/reading-list/add';
+  fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({toc_article_id: tocArticleId}),
+  }).then(r => r.json()).then(() => {
+    if (inRL) {
+      btn.dataset.inRl = 'false';
+      btn.querySelector('.material-symbols-outlined').textContent = 'mail';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Reading list';
+      btn.classList.remove('bg-primary/10', 'text-primary', 'border-primary/30');
+      btn.classList.add('border-slate-200', 'text-slate-500');
+    } else {
+      btn.dataset.inRl = 'true';
+      btn.querySelector('.material-symbols-outlined').textContent = 'mark_email_read';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' In list';
+      btn.classList.add('bg-primary/10', 'text-primary', 'border-primary/30');
+      btn.classList.remove('border-slate-200', 'text-slate-500');
+    }
+  });
+}
+
+// ── Download PDF ──────────────────────────────────────────────────────────────
+function downloadPdf(url, tocArticleId, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-sm">hourglass_empty</span> Queuing…';
+  fetch('/download', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({input: url, toc_article_id: tocArticleId}),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      btn.disabled = false;
+      btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
+      return;
+    }
+    btn.innerHTML = '<span class="material-symbols-outlined text-sm">check</span> Queued';
+  });
+}
+
+// ── Email reading list ────────────────────────────────────────────────────────
+function emailReadingList() {
+  const btn = document.getElementById('email-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-base">hourglass_empty</span> Sending…';
+  fetch('/reading-list/email', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        btn.innerHTML = '<span class="material-symbols-outlined text-base">error</span> ' + data.error;
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.innerHTML = '<span class="material-symbols-outlined text-base">mail</span> Email reading list';
+        }, 4000);
+      } else {
+        btn.innerHTML = '<span class="material-symbols-outlined text-base">check_circle</span> Sent!';
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.innerHTML = '<span class="material-symbols-outlined text-base">mail</span> Email reading list';
+        }, 3000);
+      }
+    });
+}
+
+// ── Add journal modal ─────────────────────────────────────────────────────────
+function openAddModal() {
+  const m = document.getElementById('add-modal');
+  m.style.display = 'flex';
+}
+function closeAddModal() {
+  document.getElementById('add-modal').style.display = 'none';
+}
+
+function filterCatalog(q) {
+  document.querySelectorAll('.catalog-item').forEach(li => {
+    li.style.display = li.dataset.name.includes(q.toLowerCase()) ? '' : 'none';
+  });
+}
+
+function followCatalog(name, publisher, toc_url, issn) {
+  fetch('/journals/add', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, publisher, toc_url, issn: issn || null}),
+  }).then(r => r.json()).then(data => {
+    if (data.journal_id) window.location = '/journals?selected=' + data.journal_id;
+  });
+}
+
+function followCustom() {
+  const toc_url = document.getElementById('custom-url').value.trim();
+  const name = document.getElementById('custom-name').value.trim();
+  if (!toc_url || !name) { alert('Please enter both a name and a URL.'); return; }
+  fetch('/journals/add', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, publisher: 'generic', toc_url, issn: null}),
+  }).then(r => r.json()).then(data => {
+    if (data.journal_id) window.location = '/journals?selected=' + data.journal_id;
+  });
+}
+
+function removeJournal(id, btn) {
+  if (!confirm('Unfollow this journal?')) return;
+  fetch('/journals/' + id, {method: 'DELETE'})
+    .then(() => window.location = '/journals');
+}
+
+// Close modal when clicking backdrop
+document.getElementById('add-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeAddModal();
+});
+</script>
+<style>
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
