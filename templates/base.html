@@ -60,6 +60,12 @@
 
     <!-- Nav -->
     <nav class="space-y-1 flex-1">
+      <a href="/add"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'add' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'add' %}fill-icon{% endif %}">add_circle</span>
+        <span>Add Article</span>
+      </a>
       <a href="/history"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'history' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
@@ -73,22 +79,6 @@
         <span>Bookmarks</span>
       </a>
     </nav>
-
-    <!-- Download form -->
-    <div class="px-1">
-      <p class="text-[10px] text-slate-400 font-label tracking-wider uppercase mb-2 px-2">Add Article</p>
-      <form id="download-form" class="flex flex-col gap-2">
-        <input id="download-input" type="text"
-               placeholder="PMID, DOI, or URL"
-               class="w-full border border-slate-200 rounded px-3 py-2 text-sm font-body focus:outline-none focus:border-primary"/>
-        <button type="submit"
-                class="w-full bg-primary text-white py-2 px-3 font-body font-semibold text-sm rounded hover:bg-primary-container transition-colors flex items-center justify-center gap-2">
-          <span class="material-symbols-outlined text-base">download</span>
-          <span id="download-btn-text">Download PDF</span>
-        </button>
-      </form>
-      <div id="download-status" class="mt-2 text-xs text-slate-500 hidden"></div>
-    </div>
   </aside>
 
   <!-- Main content -->
@@ -96,51 +86,6 @@
     {% block content %}{% endblock %}
   </main>
 
-  <script>
-    const form = document.getElementById('download-form');
-    const input = document.getElementById('download-input');
-    const btnText = document.getElementById('download-btn-text');
-    const status = document.getElementById('download-status');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const val = input.value.trim();
-      if (!val) return;
-
-      btnText.textContent = 'Resolving…';
-      status.textContent = '';
-      status.classList.remove('hidden');
-
-      try {
-        const res = await fetch('/download', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({input: val}),
-        });
-        const data = await res.json();
-        if (data.error) {
-          status.textContent = 'Error: ' + data.error;
-          status.classList.add('text-red-500');
-        } else {
-          status.textContent = 'Downloading: ' + (data.title || data.url).slice(0, 50) + '…';
-          input.value = '';
-          // Poll until pdf_path is set
-          const poll = setInterval(async () => {
-            const r2 = await fetch('/article/' + data.article_id, {headers: {Accept: 'application/json'}});
-            const a = await r2.json();
-            if (a.pdf_path) {
-              clearInterval(poll);
-              status.textContent = 'Done! Reloading…';
-              setTimeout(() => location.reload(), 800);
-            }
-          }, 3000);
-        }
-      } catch (err) {
-        status.textContent = 'Network error';
-      } finally {
-        btnText.textContent = 'Download PDF';
-      }
-    });
-  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

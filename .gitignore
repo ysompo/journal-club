@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 *.pdf
 *.html
-!templates/*.html
+!templates/
 *.zip
 captured_cookies.json
 .claude/

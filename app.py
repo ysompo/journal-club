@@ -21,7 +21,12 @@ cfg = load_config("config.yaml")
 
 @app.route("/")
 def index():
-    return redirect(url_for("history"))
+    return redirect(url_for("add"))
+
+
+@app.route("/add")
+def add():
+    return render_template("add_article.html", page="add")
 
 
 @app.route("/history")
