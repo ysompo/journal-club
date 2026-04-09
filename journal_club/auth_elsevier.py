@@ -90,15 +90,38 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     time.sleep(3)
     page.goto(article_url, wait_until="domcontentloaded")
     time.sleep(3)
-    for sel in [
-        "a:has-text('Download PDF')",
-        "button:has-text('Download PDF')",
-        "a[href*='pdfft']",
-        "a[href$='.pdf']",
-    ]:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   [Elsevier] Clicked: {sel}")
-            break
-        except Exception:
-            continue
+
+    print("\n[Elsevier] Extracting PDF URL from authenticated page...")
+    pdf_url = page.evaluate("""() => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        const pdf = links.find(a =>
+            (a.href.includes('pdfft') || a.href.includes('/pdf/') ||
+             a.href.endsWith('.pdf') || a.href.includes('pdf.sciencedirect')) &&
+            (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
+        );
+        return pdf ? pdf.href : null;
+    }""")
+
+    if pdf_url:
+        print(f"   PDF URL: {pdf_url[:80]}")
+        pdf_tab = page.context.new_page()
+        pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+        from journal_club.pdf_capture import wait_for_pdf
+        if not wait_for_pdf(captured, timeout_s=45):
+            print("   [Elsevier] Retrying PDF navigation...")
+            pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+            wait_for_pdf(captured, timeout_s=30)
+    else:
+        print("   No PDF URL in DOM — clicking Download PDF button...")
+        for sel in [
+            "a:has-text('Download PDF')",
+            "button:has-text('Download PDF')",
+            "a[href*='pdfft']",
+            "a[href$='.pdf']",
+        ]:
+            try:
+                page.click(sel, timeout=5000)
+                print(f"   [Elsevier] Clicked: {sel}")
+                break
+            except Exception:
+                continue

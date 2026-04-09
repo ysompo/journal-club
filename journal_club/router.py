@@ -20,7 +20,11 @@ _RULES: list[tuple[list[str], Publisher]] = [
       "academic.oup.com", "onlinelibrary.wiley.com",
       "thieme-connect.com", "annualreviews.org",
       "tandfonline.com", "karger.com",
-      "acog.org"],                                 Publisher.OPENATHENS_GENERIC),
+      "acog.org", "ahajournals.org",
+      "annals.org", "chest.journal",
+      "mayoclinicproceedings.org",
+      "bloodjournal.org", "ascopubs.org",
+      "diabetesjournals.org"],                    Publisher.OPENATHENS_GENERIC),
 ]
 
 def detect_publisher(url: str) -> Publisher:

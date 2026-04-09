@@ -11,11 +11,15 @@ from journal_club.pdf_capture import wait_for_pdf
 
 _PDF_LINK_JS = """
 () => {
+    const host = window.location.hostname;
+    // Only consider links on the same top-level domain (last two segments)
+    const tld = host.split('.').slice(-2).join('.');
     const links = Array.from(document.querySelectorAll('a[href]'));
-    const pdf = links.find(a =>
-        (a.href.endsWith('.pdf') || a.href.includes('/pdf') || a.href.includes('pdf=1')) &&
-        (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
-    );
+    const pdf = links.find(a => {
+        try { if (!new URL(a.href).hostname.endsWith(tld)) return false; } catch(e) { return false; }
+        return (a.href.endsWith('.pdf') || a.href.includes('/pdf') || a.href.includes('pdf=1')) &&
+               (a.innerText || a.textContent || '').toLowerCase().includes('pdf');
+    });
     return pdf ? pdf.href : null;
 }
 """

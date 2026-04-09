@@ -44,6 +44,8 @@ def main():
     print(f"Output: {out_path}")
     print("=" * 60)
 
+    captured = []
+
     with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
         captured = attach_pdf_hooks(context, page)
 
@@ -64,6 +66,7 @@ def main():
                 password=cfg.huji_password,
                 captured=captured,
             )
+            auth_pdf_url = None
             if publisher == Publisher.JAMA:
                 authenticate_jama(**auth_kwargs)
             elif publisher == Publisher.OVID:
@@ -73,11 +76,14 @@ def main():
             elif publisher == Publisher.SPRINGER_NATURE:
                 authenticate_springer(**auth_kwargs)
             else:  # OPENATHENS_GENERIC
-                authenticate_openathens(**auth_kwargs)
+                auth_pdf_url = authenticate_openathens(**auth_kwargs)
 
             wait_for_pdf(captured, timeout_s=60)
 
-            # Fallback: if PDF URL was found in OA check, navigate directly to it
+            # Fallback: use PDF URL from OA check or from auth function
+            fallback_url = pdf_url or auth_pdf_url
+            if not captured and fallback_url:
+                pdf_url = fallback_url  # update for consistent logging
             if not captured and pdf_url:
                 print(f"\n[Fallback] Navigating directly to PDF URL after auth...")
                 print(f"   {pdf_url[:80]}")
@@ -88,21 +94,22 @@ def main():
                 except Exception as e:
                     print(f"   Fallback error: {e}")
 
-        print("\n" + "=" * 60)
-        if save_pdf(captured, out_path):
-            size = os.path.getsize(out_path)
-            if size < 10_000:
-                print(f"WARNING: file is only {size} bytes — may not be a full PDF")
-            else:
-                print(f"SUCCESS: {out_path} ({size:,} bytes)")
-        else:
-            print("FAILED: PDF not captured — see output above")
-            sys.exit(1)
-
         try:
             input("\nPress Enter to close Chrome...")
         except EOFError:
             pass
+
+    # Save AFTER browser closes — Chrome extension may fire bytes during shutdown
+    print("\n" + "=" * 60)
+    if save_pdf(captured, out_path):
+        size = os.path.getsize(out_path)
+        if size < 10_000:
+            print(f"WARNING: file is only {size} bytes — may not be a full PDF")
+        else:
+            print(f"SUCCESS: {out_path} ({size:,} bytes)")
+    else:
+        print("FAILED: PDF not captured — see output above")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

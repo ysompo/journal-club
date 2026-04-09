@@ -122,7 +122,11 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         print(f"   PDF URL: {pdf_url[:80]}")
         pdf_tab = page.context.new_page()
         pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
-        time.sleep(15)  # give Chrome extension time to deliver PDF bytes
+        from journal_club.pdf_capture import wait_for_pdf
+        if not wait_for_pdf(captured, timeout_s=45):
+            print("   [Springer] Chrome extension did not fire — retrying navigation...")
+            pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+            wait_for_pdf(captured, timeout_s=30)
     else:
         for sel in [
             "a:has-text('Download PDF')",
