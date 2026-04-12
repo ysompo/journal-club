@@ -82,6 +82,22 @@
       </div>
     </div>
 
+    <!-- Fetching progress bar (shown only while initial TOC load is in progress) -->
+    <div id="fetch-banner" class="hidden px-6 py-4">
+      <div class="rounded-lg border border-primary/20 bg-primary/5 px-5 py-4">
+        <div class="flex items-center gap-3 mb-3">
+          <span class="material-symbols-outlined text-primary animate-spin text-xl">progress_activity</span>
+          <div>
+            <p class="text-sm font-semibold text-primary">Fetching current issue…</p>
+            <p class="text-xs text-slate-400" id="fetch-status-msg">Connecting to publisher</p>
+          </div>
+        </div>
+        <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+          <div id="fetch-bar" class="bg-primary h-1.5 rounded-full transition-all duration-500" style="width:5%"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- TOC article list -->
     <div class="px-6 py-4 space-y-2" id="toc-list">
       {% for a in toc_articles %}
@@ -114,7 +130,7 @@
               {% if in_rl %}In list{% else %}Reading list{% endif %}
             </button>
             <!-- PDF download -->
-            <button onclick="event.stopPropagation(); downloadPdf('{{ a.url }}', {{ a.id }}, this)"
+            <button onclick="event.stopPropagation(); downloadPdf('{{ a.doi or a.url }}', {{ a.id }}, this)"
               class="pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-primary text-white hover:bg-primary-container transition-colors">
               <span class="material-symbols-outlined text-sm">download</span>
               PDF
@@ -321,7 +337,9 @@ function followCatalog(name, publisher, toc_url, issn) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name, publisher, toc_url, issn: issn || null}),
   }).then(r => r.json()).then(data => {
-    if (data.journal_id) window.location = '/journals?selected=' + data.journal_id;
+    if (data.journal_id) {
+      window.location = '/journals?selected=' + data.journal_id + '&loading=1';
+    }
   });
 }
 
@@ -334,9 +352,71 @@ function followCustom() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name, publisher: 'generic', toc_url, issn: null}),
   }).then(r => r.json()).then(data => {
-    if (data.journal_id) window.location = '/journals?selected=' + data.journal_id;
+    if (data.journal_id) {
+      window.location = '/journals?selected=' + data.journal_id + '&loading=1';
+    }
   });
 }
+
+// ── Fetch progress polling ────────────────────────────────────────────────────
+function startFetchPolling(journalId) {
+  const banner = document.getElementById('fetch-banner');
+  const bar = document.getElementById('fetch-bar');
+  const msg = document.getElementById('fetch-status-msg');
+  const tocList = document.getElementById('toc-list');
+  if (!banner) return;
+
+  banner.classList.remove('hidden');
+  if (tocList) tocList.classList.add('hidden');
+
+  let progress = 5;
+  const msgs = [
+    'Connecting to publisher',
+    'Fetching issue page…',
+    'Parsing article list…',
+    'Almost there…',
+  ];
+  let msgIdx = 0;
+
+  const interval = setInterval(() => {
+    // Animate bar
+    if (progress < 85) {
+      progress += Math.random() * 12;
+      bar.style.width = Math.min(progress, 85) + '%';
+    }
+    if (msgIdx < msgs.length - 1) {
+      msgIdx++;
+      msg.textContent = msgs[msgIdx];
+    }
+
+    // Poll for completion
+    fetch('/journals/' + journalId + '/status')
+      .then(r => r.json())
+      .then(data => {
+        if (data.article_count > 0 || (data.last_checked && data.article_count === 0)) {
+          clearInterval(interval);
+          bar.style.width = '100%';
+          msg.textContent = data.article_count > 0
+            ? `Found ${data.article_count} articles`
+            : 'Done — no articles found (site may require login)';
+          setTimeout(() => {
+            // Reload without ?loading param to show the TOC
+            const url = new URL(window.location);
+            url.searchParams.delete('loading');
+            window.location = url.toString();
+          }, 600);
+        }
+      });
+  }, 2000);
+}
+
+// Auto-start polling if ?loading=1 is present
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('loading') === '1' && SELECTED_ID) {
+    startFetchPolling(SELECTED_ID);
+  }
+})();
 
 function removeJournal(id, btn) {
   if (!confirm('Unfollow this journal?')) return;

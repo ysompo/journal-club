@@ -24,19 +24,6 @@
                       transition-colors"/>
       </div>
 
-      <!-- Format hints -->
-      <div class="flex flex-wrap gap-2">
-        {% for hint in [('PMID', '39794646'), ('DOI', '10.1056/NEJMoa2504068'), ('PubMed URL', 'pubmed.ncbi.nlm.nih.gov/…'), ('Article URL', 'nejm.org/doi/…')] %}
-        <button type="button"
-                class="hint-chip text-[11px] font-label font-semibold px-2.5 py-1
-                       bg-surface-container text-on-surface-variant rounded-full
-                       hover:bg-primary/10 hover:text-primary transition-colors"
-                data-value="{{ hint[1] }}">
-          {{ hint[0] }}
-        </button>
-        {% endfor %}
-      </div>
-
       <button type="submit" id="submit-btn"
               class="w-full bg-primary text-white py-3 px-4 font-body font-semibold text-sm
                      rounded-md hover:bg-primary-container transition-colors
@@ -93,13 +80,6 @@
   const submitTxt = document.getElementById('submit-text');
   const submitIco = document.getElementById('submit-icon');
   const resultArea = document.getElementById('result-area');
-
-  // Hint chips fill the input
-  document.querySelectorAll('.hint-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      inputEl.focus();
-    });
-  });
 
   function showState(id) {
     ['state-resolving','state-done','state-error'].forEach(s => {
