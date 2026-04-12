@@ -10,6 +10,12 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     print(f"\n[Elsevier Auth] Article: {article_url[:60]}")
     page.goto(article_url, wait_until="domcontentloaded")
     time.sleep(3)
+
+    # If the Chrome extension already captured the PDF (cached session), skip auth entirely
+    if captured:
+        print("   [Elsevier] PDF captured during navigation — skipping auth")
+        return
+
     dismiss_cookies(page)
     for sel in [
         "text=Get access",
@@ -92,15 +98,19 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     time.sleep(3)
 
     print("\n[Elsevier] Extracting PDF URL from authenticated page...")
-    pdf_url = page.evaluate("""() => {
-        const links = Array.from(document.querySelectorAll('a[href]'));
-        const pdf = links.find(a =>
-            (a.href.includes('pdfft') || a.href.includes('/pdf/') ||
-             a.href.endsWith('.pdf') || a.href.includes('pdf.sciencedirect')) &&
-            (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
-        );
-        return pdf ? pdf.href : null;
-    }""")
+    try:
+        pdf_url = page.evaluate("""() => {
+            const links = Array.from(document.querySelectorAll('a[href]'));
+            const pdf = links.find(a =>
+                (a.href.includes('pdfft') || a.href.includes('/pdf/') ||
+                 a.href.endsWith('.pdf') || a.href.includes('pdf.sciencedirect')) &&
+                (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
+            );
+            return pdf ? pdf.href : null;
+        }""")
+    except Exception as e:
+        print(f"   [Elsevier] PDF URL eval error (page may have navigated): {e}")
+        pdf_url = None
 
     if pdf_url:
         print(f"   PDF URL: {pdf_url[:80]}")

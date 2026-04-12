@@ -213,6 +213,11 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
     """
     print(f"\n[OA Generic Auth] Article: {article_url[:60]}")
 
+    # If the Chrome extension already captured the PDF (cached session), skip auth entirely
+    if captured:
+        print("   [OA] PDF captured during navigation — skipping auth")
+        return None
+
     sso_url = _build_sso_url(article_url)
     if sso_url:
         # Navigate directly to the publisher's ssostart page
