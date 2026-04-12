@@ -58,11 +58,20 @@ def get_runtime_config() -> Config:
 def _refresh_journal(journal: dict) -> None:
     """Scrape TOC for a single journal and persist to DB. Safe to call in any thread."""
     try:
-        publisher = next(
-            (e.publisher for e in CATALOG if e.toc_url == journal["toc_url"]),
-            "generic",
+        catalog_entry = next(
+            (e for e in CATALOG if e.toc_url == journal["toc_url"]),
+            None,
         )
-        result = scrape(publisher, journal["toc_url"], issn=journal.get("issn"))
+        publisher = catalog_entry.publisher if catalog_entry else "generic"
+        days_per_issue = catalog_entry.days_per_issue if catalog_entry else 7
+        issues_to_fetch = journal.get("issues_to_fetch") or 1
+        result = scrape(
+            publisher,
+            journal["toc_url"],
+            issn=journal.get("issn"),
+            issues_to_fetch=issues_to_fetch,
+            days_per_issue=days_per_issue,
+        )
         old_label = journal.get("current_issue_label", "")
         is_new = bool(result.issue_label and result.issue_label != old_label)
         storage.update_journal_toc(journal["id"], result.issue_label, result.articles, is_new)
@@ -231,6 +240,18 @@ def journals_refresh(journal_id: int):
         return jsonify({"error": "Journal not found"}), 404
     threading.Thread(target=_refresh_journal, args=(j,), daemon=True).start()
     return jsonify({"status": "refreshing"})
+
+
+@app.route("/journals/<int:journal_id>/settings", methods=["POST"])
+def journals_settings(journal_id: int):
+    data = request.get_json(silent=True) or {}
+    n = data.get("issues_to_fetch")
+    if not isinstance(n, int) or not (1 <= n <= 52):
+        return jsonify({"error": "issues_to_fetch must be an integer between 1 and 52"}), 400
+    if storage.get_journal(journal_id) is None:
+        return jsonify({"error": "Journal not found"}), 404
+    storage.set_journal_issue_span(journal_id, n)
+    return jsonify({"status": "saved"})
 
 
 @app.route("/journals/<int:journal_id>", methods=["DELETE"])

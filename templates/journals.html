@@ -36,6 +36,14 @@
             {% endif %}
           </div>
           <button
+            onclick="event.stopPropagation(); openSpanModal({{ j.id }}, '{{ j.name | replace("'", "\\'") }}', {{ j.issues_to_fetch or 1 }})"
+            class="flex-shrink-0 text-xs px-1.5 py-0.5 rounded-full border border-slate-200 text-slate-400 hover:border-primary hover:text-primary transition-colors"
+            id="span-pill-{{ j.id }}"
+            title="Configure issue span">
+            {%- set n = j.issues_to_fetch or 1 -%}
+            {{ n }} issue{{ 's' if n != 1 }}
+          </button>
+          <button
             onclick="event.stopPropagation(); removeJournal({{ j.id }}, this)"
             class="text-slate-300 hover:text-red-400 transition-colors ml-1"
             title="Unfollow">
@@ -214,6 +222,30 @@
           Follow this URL
         </button>
       </div>
+    </div>
+  </div>
+</div>
+<!-- Issue Span Modal -->
+<div id="span-modal" class="fixed inset-0 bg-black/40 z-50 hidden items-center justify-center" style="display:none">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4">
+    <div class="px-6 pt-5 pb-4 border-b border-slate-200 flex items-center justify-between">
+      <h3 class="font-headline font-bold text-base text-on-surface" id="span-modal-title"></h3>
+      <button onclick="closeSpanModal()" class="text-slate-400 hover:text-slate-600">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="px-6 py-5">
+      <label class="text-sm font-semibold text-on-surface block mb-2">Fetch last N issues</label>
+      <input type="number" id="span-input" min="1" max="52" value="1"
+        class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-primary mb-1"
+        onkeydown="if(event.key==='Enter') saveSpan()">
+      <p class="text-xs text-slate-400">Default is 1 (latest issue only). Max 52 (~1 year).</p>
+    </div>
+    <div class="px-6 pb-5">
+      <button onclick="saveSpan()"
+        class="w-full py-2 rounded bg-primary text-white text-sm font-semibold hover:bg-primary-container transition-colors">
+        Save
+      </button>
     </div>
   </div>
 </div>
@@ -427,6 +459,40 @@ function removeJournal(id, btn) {
 // Close modal when clicking backdrop
 document.getElementById('add-modal').addEventListener('click', function(e) {
   if (e.target === this) closeAddModal();
+});
+
+// ── Issue span modal ──────────────────────────────────────────────────────────
+let _spanJournalId = null;
+
+function openSpanModal(id, name, current) {
+  _spanJournalId = id;
+  document.getElementById('span-modal-title').textContent = name;
+  document.getElementById('span-input').value = current;
+  document.getElementById('span-modal').style.display = 'flex';
+}
+
+function closeSpanModal() {
+  document.getElementById('span-modal').style.display = 'none';
+}
+
+function saveSpan() {
+  const n = parseInt(document.getElementById('span-input').value, 10);
+  if (!n || n < 1 || n > 52) { alert('Please enter a number between 1 and 52.'); return; }
+  fetch('/journals/' + _spanJournalId + '/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({issues_to_fetch: n}),
+  }).then(r => r.json()).then(data => {
+    if (data.status === 'saved') {
+      const pill = document.getElementById('span-pill-' + _spanJournalId);
+      if (pill) pill.textContent = n === 1 ? '1 issue' : `${n} issues`;
+      closeSpanModal();
+    }
+  });
+}
+
+document.getElementById('span-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeSpanModal();
 });
 </script>
 <style>

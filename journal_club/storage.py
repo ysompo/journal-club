@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS journals (
     issn                TEXT,
     last_checked        TEXT,
     current_issue_label TEXT,
-    has_new_issue       INTEGER NOT NULL DEFAULT 0
+    has_new_issue       INTEGER NOT NULL DEFAULT 0,
+    issues_to_fetch     INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS toc_articles (
@@ -74,11 +75,21 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply incremental schema migrations for existing databases."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(journals)")}
+    if "issues_to_fetch" not in cols:
+        conn.execute(
+            "ALTER TABLE journals ADD COLUMN issues_to_fetch INTEGER NOT NULL DEFAULT 1"
+        )
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(_DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.executescript(_DDL)
+    _migrate(conn)
     return conn
 
 
@@ -199,6 +210,15 @@ def add_journal(name: str, publisher: str, toc_url: str, issn: str | None = None
 def remove_journal(journal_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM journals WHERE id = ?", (journal_id,))
+
+
+def set_journal_issue_span(journal_id: int, n: int) -> None:
+    """Set how many back-issues to fetch for this journal (1 = current only)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE journals SET issues_to_fetch = ? WHERE id = ?",
+            (max(1, min(52, n)), journal_id),
+        )
 
 
 def get_journals() -> list[dict]:

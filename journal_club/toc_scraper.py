@@ -35,23 +35,27 @@ class TocResult:
     # Each article dict has keys: url, title, authors (list), article_type, doi, abstract
 
 
-def scrape_via_pubmed(issn: str) -> TocResult:
+def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
     """
-    Fetch the most recent issue of a journal by ISSN using PubMed eutils.
-    Works for any journal indexed in PubMed, including Elsevier journals that
-    block HTML scraping (AJOG, Lancet, ScienceDirect etc.)
+    Fetch articles for a journal by ISSN using PubMed eutils.
+    When reldate > 0, fetches articles published within the last reldate days.
+    Otherwise fetches the 40 most recent articles.
     """
     try:
-        # Search for the 40 most recent articles from this journal
+        retmax = max(40, min(200, reldate // 7 * 15)) if reldate > 0 else 40
+        params: dict = {
+            "db": "pubmed",
+            "term": f"{issn}[ISSN]",
+            "sort": "pub date",
+            "retmax": retmax,
+            "retmode": "json",
+        }
+        if reldate > 0:
+            params["reldate"] = reldate
+            params["datetype"] = "edat"
         r = requests.get(
             f"{_EUTILS}/esearch.fcgi",
-            params={
-                "db": "pubmed",
-                "term": f"{issn}[ISSN]",
-                "sort": "pub date",
-                "retmax": 40,
-                "retmode": "json",
-            },
+            params=params,
             headers=_PUBMED_HEADERS, timeout=_TIMEOUT,
         )
         r.raise_for_status()
@@ -164,25 +168,40 @@ def scrape_via_pubmed(issn: str) -> TocResult:
         return TocResult(issue_label="")
 
 
-def scrape(publisher: str, toc_url: str, issn: str | None = None) -> TocResult:
+def scrape(
+    publisher: str,
+    toc_url: str,
+    issn: str | None = None,
+    issues_to_fetch: int = 1,
+    days_per_issue: int = 7,
+) -> TocResult:
     """
-    Fetch and parse a journal's current-issue TOC.
-    Tries HTML scraping first; if that returns 0 articles and an ISSN is
-    provided, falls back to PubMed eutils (works for any indexed journal).
+    Fetch and parse a journal's TOC.
+
+    issues_to_fetch=1 (default): HTML scrape of the current issue; falls back
+    to PubMed if HTML yields 0 articles and an ISSN is available.
+
+    issues_to_fetch>1 (hybrid): HTML scrape for the current issue + PubMed
+    date-based query for back-issues (reldate = issues_to_fetch * days_per_issue),
+    merged and deduplicated by DOI. Requires an ISSN; logs a warning and returns
+    HTML-only if none is available.
     """
+    reldate = issues_to_fetch * days_per_issue if issues_to_fetch > 1 else 0
+
     try:
         r = requests.get(toc_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
         r.raise_for_status()
     except requests.HTTPError as e:
         print(f"   [TOC] HTTP {e.response.status_code} for {toc_url} — trying PubMed fallback")
         if issn:
-            return scrape_via_pubmed(issn)
+            return scrape_via_pubmed(issn, reldate=reldate)
         return TocResult(issue_label="")
     except requests.RequestException as e:
         print(f"   [TOC] Network error for {toc_url}: {e} — trying PubMed fallback")
         if issn:
-            return scrape_via_pubmed(issn)
+            return scrape_via_pubmed(issn, reldate=reldate)
         return TocResult(issue_label="")
+
     soup = BeautifulSoup(r.text, "html.parser")
 
     parsers = {
@@ -203,11 +222,36 @@ def scrape(publisher: str, toc_url: str, issn: str | None = None) -> TocResult:
     parser = parsers.get(publisher, _parse_generic)
     result = parser(soup, toc_url)
 
-    # If HTML scraping yielded nothing and we have an ISSN, fall back to PubMed
-    if not result.articles and issn:
-        print(f"   [TOC] HTML parse returned 0 articles — trying PubMed fallback (ISSN {issn})")
-        return scrape_via_pubmed(issn)
+    if issues_to_fetch == 1:
+        # Default: PubMed fallback only when HTML yields nothing
+        if not result.articles and issn:
+            print(f"   [TOC] HTML parse returned 0 articles — trying PubMed fallback (ISSN {issn})")
+            return scrape_via_pubmed(issn)
+        return result
 
+    # Hybrid mode: append PubMed back-issues to HTML current issue
+    if not issn:
+        print(f"   [TOC] No ISSN for {toc_url} — cannot fetch back-issues, returning HTML-only")
+        return result
+
+    pubmed_result = scrape_via_pubmed(issn, reldate=reldate)
+
+    if not result.articles:
+        # HTML yielded nothing; use full PubMed result
+        return pubmed_result
+
+    # Merge: HTML articles take precedence; skip PubMed duplicates by DOI or URL
+    current_dois = {a["doi"] for a in result.articles if a.get("doi")}
+    current_urls = {a["url"] for a in result.articles}
+    for article in pubmed_result.articles:
+        doi = article.get("doi")
+        if doi and doi in current_dois:
+            continue
+        if article.get("url") in current_urls:
+            continue
+        result.articles.append(article)
+
+    print(f"   [TOC] Hybrid merge: {len(result.articles)} total articles after back-issue append")
     return result
 
 

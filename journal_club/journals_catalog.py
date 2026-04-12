@@ -13,6 +13,7 @@ class CatalogEntry:
     publisher: str      # Used by toc_scraper to pick the right parser
     toc_url: str
     issn: str | None = None
+    days_per_issue: int = 7  # Approximate days between issues (7=weekly, 14=biweekly, 30=monthly)
 
 
 CATALOG: list[CatalogEntry] = [
@@ -39,6 +40,7 @@ CATALOG: list[CatalogEntry] = [
         publisher="nature",
         toc_url="https://www.nature.com/nm/current-issue",
         issn="1078-8956",
+        days_per_issue=30,
     ),
     CatalogEntry(
         name="BMJ",
@@ -51,6 +53,7 @@ CATALOG: list[CatalogEntry] = [
         publisher="acpjournals",
         toc_url="https://www.acpjournals.org/toc/aim/current",
         issn="0003-4819",
+        days_per_issue=14,
     ),
     CatalogEntry(
         name="Circulation",
@@ -69,18 +72,21 @@ CATALOG: list[CatalogEntry] = [
         publisher="chest",
         toc_url="https://journal.chestnet.org/current",
         issn="0012-3692",
+        days_per_issue=30,
     ),
     CatalogEntry(
         name="Journal of Clinical Oncology",
         publisher="asco",
         toc_url="https://ascopubs.org/toc/jco/current",
         issn="0732-183X",
+        days_per_issue=14,
     ),
     CatalogEntry(
         name="Gut",
         publisher="bmj",
         toc_url="https://gut.bmj.com/content/current",
         issn="0017-5749",
+        days_per_issue=30,
     ),
     CatalogEntry(
         name="Blood",
@@ -93,29 +99,34 @@ CATALOG: list[CatalogEntry] = [
         publisher="diabetesjournals",
         toc_url="https://diabetesjournals.org/care/issue/current",
         issn="0149-5992",
+        days_per_issue=30,
     ),
     CatalogEntry(
         name="NEJM Evidence",
         publisher="nejm",
         toc_url="https://evidence.nejm.org/toc/evid/current",
         issn="2766-5526",
+        days_per_issue=14,
     ),
     CatalogEntry(
         name="JAMA Internal Medicine",
         publisher="jama",
         toc_url="https://jamanetwork.com/journals/jamainternalmedicine/issue/current",
         issn="2168-6106",
+        days_per_issue=30,
     ),
     CatalogEntry(
         name="American Journal of Obstetrics and Gynecology",
         publisher="elsevier",
         toc_url="https://www.ajog.org/current",
         issn="0002-9378",
+        days_per_issue=30,
     ),
     CatalogEntry(
         name="New England Journal of Medicine: Evidence",
         publisher="nejm",
         toc_url="https://evidence.nejm.org/toc/evid/current",
         issn="2766-5526",
+        days_per_issue=14,
     ),
 ]
