@@ -37,34 +37,6 @@
     </div>
   </section>
 
-  <!-- Email — Resend -->
-  <section class="mb-8">
-    <h2 class="font-headline text-base font-bold text-on-surface mb-1">Email — reading list</h2>
-    <p class="text-xs text-slate-400 mb-4">
-      Powered by <a href="https://resend.com" target="_blank" class="text-primary hover:underline">Resend</a>.
-      Enter the API key and verified sender address below.
-    </p>
-    <div class="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
-      <div class="px-5 py-4 flex items-center gap-4">
-        <label class="w-32 text-sm font-semibold text-on-surface-variant flex-shrink-0">API key</label>
-        <div class="flex-1 flex gap-2">
-          <input type="password" id="resend_api_key" value="{{ cfg.resend_api_key }}"
-            placeholder="re_••••••••••••••••"
-            class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-primary">
-          <button onclick="togglePwd('resend_api_key', this)" class="text-slate-400 hover:text-slate-600 transition-colors">
-            <span class="material-symbols-outlined text-lg">visibility</span>
-          </button>
-        </div>
-      </div>
-      <div class="px-5 py-4 flex items-center gap-4">
-        <label class="w-32 text-sm font-semibold text-on-surface-variant flex-shrink-0">From address</label>
-        <input type="text" id="resend_from" value="{{ cfg.resend_from }}"
-          placeholder="Journal Club &lt;noreply@yourdomain.com&gt;"
-          class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
-      </div>
-    </div>
-  </section>
-
   <!-- Recipients -->
   <section class="mb-8">
     <h2 class="font-headline text-base font-bold text-on-surface mb-1">Recipients</h2>
@@ -103,8 +75,7 @@ function togglePwd(id, btn) {
 }
 
 function saveSettings() {
-  const keys = ['huji_email','huji_password','resend_api_key','resend_from',
-                 'email_to_1','email_to_2','email_to_3'];
+  const keys = ['huji_email','huji_password','email_to_1','email_to_2','email_to_3'];
   const data = {};
   keys.forEach(k => { const el = document.getElementById(k); if (el) data[k] = el.value; });
   fetch('/settings', {

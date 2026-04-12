@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import threading
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+import functools
+import secrets
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from journal_club.config import Config, load_config
@@ -19,7 +22,18 @@ from journal_club.mailer import send_reading_list
 import journal_club.storage as storage
 
 app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)   # ephemeral — sessions reset on restart (fine for local use)
 cfg = load_config("config.yaml")
+
+
+def require_admin(f):
+    """Decorator: redirect to /admin/login if not authenticated as admin."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("is_admin"):
+            return redirect(url_for("admin_login", next=request.path))
+        return f(*args, **kwargs)
+    return wrapper
 
 
 def get_runtime_config() -> Config:
@@ -298,6 +312,44 @@ def settings():
 def settings_save():
     data = request.get_json(force=True) or {}
     for key in storage._SETTINGS_KEYS:
+        if key in data:
+            storage.set_setting(key, data[key])
+    return jsonify({"status": "saved"})
+
+
+# ── Admin routes ─────────────────────────────────────────────────────────────
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    error = None
+    if request.method == "POST":
+        pwd = request.form.get("password", "")
+        if pwd == cfg.admin_password:
+            session["is_admin"] = True
+            return redirect(request.args.get("next") or url_for("admin_settings"))
+        error = "Incorrect password."
+    return render_template("admin_login.html", error=error)
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.pop("is_admin", None)
+    return redirect(url_for("settings"))
+
+
+@app.route("/admin/settings", methods=["GET"])
+@require_admin
+def admin_settings():
+    s = storage.get_all_settings()
+    rc = get_runtime_config()
+    return render_template("admin_settings.html", page="admin", cfg=rc)
+
+
+@app.route("/admin/settings", methods=["POST"])
+@require_admin
+def admin_settings_save():
+    data = request.get_json(force=True) or {}
+    for key in ["resend_api_key", "resend_from"]:
         if key in data:
             storage.set_setting(key, data[key])
     return jsonify({"status": "saved"})
