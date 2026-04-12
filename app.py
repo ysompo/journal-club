@@ -91,6 +91,9 @@ scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(_refresh_all_journals, "interval", weeks=1, id="weekly_toc_refresh")
 scheduler.start()
 
+# Only one browser-based download can run at a time (all downloads share port 9222)
+_download_lock = threading.Lock()
+
 
 # ── Existing routes ───────────────────────────────────────────────────────────
 
@@ -145,6 +148,9 @@ def download():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+    if not _download_lock.acquire(blocking=False):
+        return jsonify({"error": "A download is already in progress — please wait for it to finish."}), 409
+
     article_id = storage.save_article(meta, pdf_path=None)
 
     runtime_cfg = get_runtime_config()
@@ -158,6 +164,8 @@ def download():
                 storage.link_reading_list_to_article(toc_article_id, article_id)
         except Exception as e:
             print(f"[Download thread] Error: {e}")
+        finally:
+            _download_lock.release()
 
     threading.Thread(target=_run, daemon=True).start()
 

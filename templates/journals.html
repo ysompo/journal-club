@@ -313,8 +313,13 @@ function downloadPdf(url, tocArticleId, btn) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({input: url, toc_article_id: tocArticleId}),
   })
-  .then(r => r.json())
-  .then(data => {
+  .then(r => r.json().then(data => ({data, status: r.status})))
+  .then(({data, status}) => {
+    if (status === 409) {
+      btn.disabled = false;
+      btn.innerHTML = '<span class="material-symbols-outlined text-sm">schedule</span> Busy — retry';
+      return;
+    }
     if (data.error) {
       btn.disabled = false;
       btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
