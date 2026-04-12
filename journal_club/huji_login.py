@@ -7,7 +7,11 @@ def dismiss_cookies(page: Page, timeout_ms: int = 3000):
     for sel in [
         "button:has-text('Accept all cookies')",
         "button:has-text('Accept all')",
+        "button:has-text('Allow all')",
         "button:has-text('Accept necessary cookies')",
+        "button:has-text('Confirm my choices')",   # OneTrust preference center (Elsevier/AJOG)
+        "button#onetrust-accept-btn-handler",       # OneTrust standard accept button
+        "button.onetrust-close-btn-handler",        # OneTrust close
         "button:has-text('Accept')",
         "button:has-text('I agree')",
         "button:has-text('OK')",
