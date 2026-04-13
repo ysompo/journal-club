@@ -293,7 +293,7 @@ function toggleArticle(header) {
 
 // ── Select a journal (reload page with ?selected=) ────────────────────────────
 function selectJournal(id) {
-  window.location = '/journals?selected=' + id;
+  window.location = './journals?selected=' + id;
 }
 
 // ── Refresh journal TOC ───────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ function refreshJournal(id) {
   const icon = document.getElementById('refresh-icon');
   btn.disabled = true;
   icon.style.animation = 'spin 1s linear infinite';
-  fetch('/journals/' + id + '/refresh', {method: 'POST'})
+  fetch('./journals/' + id + '/refresh', {method: 'POST'})
     .then(() => {
       setTimeout(() => window.location.reload(), 8000);
     })
@@ -338,7 +338,7 @@ function toggleReadingList(tocArticleId, btn) {
 function downloadPdf(url, tocArticleId, btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="material-symbols-outlined text-sm">hourglass_empty</span> Queuing…';
-  fetch('/download', {
+  fetch('./download', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({input: url, toc_article_id: tocArticleId}),
@@ -362,14 +362,14 @@ function downloadPdf(url, tocArticleId, btn) {
 
 function pollDownload(articleId, btn) {
   const poll = setInterval(() => {
-    fetch('/download/status/' + articleId)
+    fetch('./download/status/' + articleId)
       .then(r => r.json())
       .then(data => {
         if (data.status === 'done') {
           clearInterval(poll);
           // Replace button with a green "View PDF" link
           const link = document.createElement('a');
-          link.href = '/pdf/' + articleId;
+          link.href = './pdf/' + articleId;
           link.target = '_blank';
           link.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors';
           link.innerHTML = '<span class="material-symbols-outlined text-sm">picture_as_pdf</span> View PDF';
@@ -386,7 +386,7 @@ function emailReadingList() {
   const btn = document.getElementById('email-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="material-symbols-outlined text-base">hourglass_empty</span> Sending…';
-  fetch('/reading-list/email', {method: 'POST'})
+  fetch('./reading-list/email', {method: 'POST'})
     .then(r => r.json())
     .then(data => {
       if (data.error) {
@@ -421,13 +421,13 @@ function filterCatalog(q) {
 }
 
 function followCatalog(name, publisher, toc_url, issn) {
-  fetch('/journals/add', {
+  fetch('./journals/add', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name, publisher, toc_url, issn: issn || null}),
   }).then(r => r.json()).then(data => {
     if (data.journal_id) {
-      window.location = '/journals?selected=' + data.journal_id + '&loading=1';
+      window.location = './journals?selected=' + data.journal_id + '&loading=1';
     }
   });
 }
@@ -436,13 +436,13 @@ function followCustom() {
   const toc_url = document.getElementById('custom-url').value.trim();
   const name = document.getElementById('custom-name').value.trim();
   if (!toc_url || !name) { alert('Please enter both a name and a URL.'); return; }
-  fetch('/journals/add', {
+  fetch('./journals/add', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name, publisher: 'generic', toc_url, issn: null}),
   }).then(r => r.json()).then(data => {
     if (data.journal_id) {
-      window.location = '/journals?selected=' + data.journal_id + '&loading=1';
+      window.location = './journals?selected=' + data.journal_id + '&loading=1';
     }
   });
 }
@@ -479,7 +479,7 @@ function startFetchPolling(journalId) {
     }
 
     // Poll for completion
-    fetch('/journals/' + journalId + '/status')
+    fetch('./journals/' + journalId + '/status')
       .then(r => r.json())
       .then(data => {
         if (data.article_count > 0 || (data.last_checked && data.article_count === 0)) {
@@ -509,8 +509,8 @@ function startFetchPolling(journalId) {
 
 function removeJournal(id, btn) {
   if (!confirm('Unfollow this journal?')) return;
-  fetch('/journals/' + id, {method: 'DELETE'})
-    .then(() => window.location = '/journals');
+  fetch('./journals/' + id, {method: 'DELETE'})
+    .then(() => window.location = './journals');
 }
 
 // Close modal when clicking backdrop
@@ -535,7 +535,7 @@ function closeSpanModal() {
 function saveSpan() {
   const n = parseInt(document.getElementById('span-input').value, 10);
   if (!n || n < 1 || n > 52) { alert('Please enter a number between 1 and 52.'); return; }
-  fetch('/journals/' + _spanJournalId + '/settings', {
+  fetch('./journals/' + _spanJournalId + '/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({issues_to_fetch: n}),
