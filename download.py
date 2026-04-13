@@ -55,6 +55,19 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
     print(f"Output: {out_path}")
     print("=" * 60)
 
+    # ── 1b. Try Unpaywall for open-access PDF ──────────────────────────────
+    if meta.doi:
+        from journal_club.unpaywall import query_unpaywall
+        oa = query_unpaywall(meta.doi, cfg.huji_email)
+        if oa and oa.get("pdf_url"):
+            from journal_club.http_download import download_pdf_http
+            print(f"[Unpaywall] Found OA PDF: {oa['pdf_url'][:80]}")
+            if download_pdf_http(oa["pdf_url"], out_path):
+                size = os.path.getsize(out_path)
+                print(f"SUCCESS (Unpaywall): {out_path} ({size:,} bytes)")
+                return meta, out_path
+            print("[Unpaywall] HTTP download failed, falling through to browser...")
+
     captured = []
 
     # ── 2. Browser session (up to 2 attempts) ────────────────────────────────
