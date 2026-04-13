@@ -3,7 +3,41 @@ import time
 from playwright.sync_api import Page
 
 def dismiss_cookies(page: Page, timeout_ms: int = 3000):
-    """Try common cookie banner dismiss buttons."""
+    """Try common cookie banner dismiss buttons, including JS fallback for shadow DOM."""
+    # JavaScript fallback — handles OneTrust in both simple-banner and preference-center states.
+    # onetrust-pc-btn-handler has dual meaning:
+    #   • On simple banner  → opens the preference center  (DO NOT click)
+    #   • Inside preference center → "Confirm my choices"  (click to dismiss)
+    # So: if preference center is visible, click pc-btn-handler; otherwise click accept-btn-handler.
+    try:
+        clicked = page.evaluate("""() => {
+            const pcSdk = document.getElementById('onetrust-pc-sdk');
+            const pcVisible = pcSdk && getComputedStyle(pcSdk).display !== 'none';
+
+            if (pcVisible) {
+                // Preference center is open — "Confirm my choices"
+                const btn = document.getElementById('onetrust-pc-btn-handler');
+                if (btn) { btn.click(); return 'pc-confirm'; }
+            }
+
+            // Simple banner — "Accept All"
+            const acceptBtn = document.getElementById('onetrust-accept-btn-handler');
+            if (acceptBtn) { acceptBtn.click(); return 'accept-all'; }
+
+            // Generic text fallback
+            const btns = Array.from(document.querySelectorAll('button'));
+            const target = btns.find(b =>
+                /accept all|allow all|confirm my choices/i.test(b.textContent)
+            );
+            if (target) { target.click(); return 'text-match'; }
+            return false;
+        }""")
+        if clicked:
+            time.sleep(0.5)
+            return
+    except Exception:
+        pass
+
     for sel in [
         "button:has-text('Accept all cookies')",
         "button:has-text('Accept all')",

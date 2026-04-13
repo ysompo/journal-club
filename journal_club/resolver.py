@@ -115,6 +115,55 @@ def _fetch_by_pmid(pmid: str) -> ArticleMetadata:
     return meta
 
 
+def _elsevier_resolve(doi: str) -> str:
+    """
+    Resolve an Elsevier DOI to the actual publisher article URL, bypassing
+    linkinghub.elsevier.com (which intermittently returns 504).
+
+    Strategy:
+    1. HEAD doi.org/{doi} — gets a 302 Location pointing at linkinghub.
+    2. If linkinghub, try following it (fast when healthy).
+    3. If linkinghub is slow/504, parse the Redirect= query param from its
+       URL — that param *is* the real article URL (e.g. ajog.org/...).
+    4. Falls back to doi.org URL on any error.
+    """
+    from urllib.parse import urlparse, parse_qs, unquote
+    doi_url = f"https://doi.org/{doi}"
+    _ua = {"User-Agent": "Mozilla/5.0 (compatible; JournalClubBot/1.0)"}
+    try:
+        r = requests.head(doi_url, allow_redirects=False, timeout=8, headers=_ua)
+        loc = r.headers.get("Location", "")
+        if not loc:
+            return doi_url
+        # doi.org jumped straight to the publisher — great
+        if "linkinghub.elsevier.com" not in loc:
+            print(f"   [Resolver] Elsevier direct redirect: {loc[:80]}")
+            return loc
+        # Try following linkinghub itself (healthy → 302 to journal page)
+        try:
+            r2 = requests.head(loc, allow_redirects=False, timeout=5, headers=_ua)
+            loc2 = r2.headers.get("Location", "")
+            if loc2 and r2.status_code in (301, 302, 303, 307, 308):
+                print(f"   [Resolver] Elsevier via linkinghub: {loc2[:80]}")
+                return loc2
+        except Exception:
+            pass
+        # linkinghub is down/slow — extract Redirect= param from its URL
+        qs = parse_qs(urlparse(loc).query)
+        redirect = qs.get("Redirect", [""])[0]
+        if redirect:
+            target = unquote(redirect)
+            print(f"   [Resolver] Elsevier Redirect param: {target[:80]}")
+            return target
+        # Last resort: PII-based ScienceDirect URL
+        if "/pii/" in loc:
+            pii = loc.split("/pii/")[-1].split("?")[0]
+            return f"https://www.sciencedirect.com/science/article/pii/{pii}"
+    except Exception as e:
+        print(f"   [Resolver] Elsevier redirect error: {e}")
+    return doi_url
+
+
 def _doi_to_url(doi: str) -> str:
     """
     Return the best-guess publisher URL for a DOI.
@@ -124,7 +173,6 @@ def _doi_to_url(doi: str) -> str:
     institutional network filters).  Unknown prefixes fall back to
     https://doi.org/{doi} — the browser will follow the redirect correctly.
     """
-    prefix = doi.split("/")[0] if "/" in doi else ""
     if "10.1056" in doi:             # NEJM
         return f"https://www.nejm.org/doi/full/{doi}"
     if "10.1001" in doi:             # JAMA Network
@@ -134,7 +182,7 @@ def _doi_to_url(doi: str) -> str:
     if "10.1093" in doi:             # OUP (academic.oup.com)
         return f"https://doi.org/{doi}"
     if "10.1016" in doi or "10.1053" in doi:   # Elsevier / ScienceDirect
-        return f"https://doi.org/{doi}"
+        return _elsevier_resolve(doi)
     if "10.1038" in doi:             # Nature
         return f"https://www.nature.com/articles/{doi.split('/')[-1]}"
     if "10.1007" in doi:             # Springer
@@ -177,6 +225,13 @@ def resolve(input_str: str) -> ArticleMetadata:
         return meta
 
     # kind == "url" — direct article URL, no metadata lookup
+    # Special case: doi.org URLs for Elsevier — follow redirect to bypass linkinghub
+    if value.startswith("https://doi.org/") or value.startswith("http://doi.org/"):
+        bare = value.split("doi.org/", 1)[-1]
+        if "10.1016" in bare or "10.1053" in bare:
+            resolved = _elsevier_resolve(bare)
+            print(f"   [Resolver] Direct doi.org → {resolved[:80]}")
+            return ArticleMetadata(url=resolved)
     print(f"   [Resolver] Direct URL: {value[:80]}")
     return ArticleMetadata(url=value)
 
