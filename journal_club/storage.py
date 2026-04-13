@@ -480,16 +480,24 @@ def get_access_requests(status: str | None = None) -> list[dict]:
 def approve_access_request(request_id: int) -> None:
     """Approve an access request."""
     now = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
+    conn = _connect()
+    try:
         conn.execute(
             "UPDATE access_requests SET status = 'approved', approved_at = ? WHERE id = ?",
             (now, request_id),
         )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def deny_access_request(request_id: int) -> None:
     """Deny an access request."""
-    with _connect() as conn:
+    conn = _connect()
+    try:
         conn.execute(
             "UPDATE access_requests SET status = 'denied' WHERE id = ?", (request_id,)
         )
+        conn.commit()
+    finally:
+        conn.close()
