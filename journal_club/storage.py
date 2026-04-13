@@ -356,6 +356,25 @@ def get_reading_list_ids() -> set[int]:
     return {r["toc_article_id"] for r in rows}
 
 
+def get_downloaded_toc_article_map(journal_id: int) -> dict[int, int]:
+    """
+    For the given journal, return {toc_article_id: article_id} for every
+    TOC article whose PDF has been successfully downloaded.
+    Used to show a "View PDF" button in the journals TOC view.
+    """
+    with _connect() as conn:
+        rows = conn.execute("""
+            SELECT rl.toc_article_id, rl.article_id
+            FROM reading_list rl
+            JOIN articles a ON a.id = rl.article_id
+            WHERE a.pdf_path IS NOT NULL
+              AND rl.toc_article_id IN (
+                  SELECT id FROM toc_articles WHERE journal_id = ?
+              )
+        """, (journal_id,)).fetchall()
+    return {r["toc_article_id"]: r["article_id"] for r in rows}
+
+
 # ── Settings operations ───────────────────────────────────────────────────────
 
 _SETTINGS_KEYS = [

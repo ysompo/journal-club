@@ -38,19 +38,20 @@
           {% endif %}
 
           <!-- Action row -->
-          <div class="flex items-center gap-4 mt-1">
+          <div class="flex items-center gap-4 mt-1 flex-wrap">
             {% if a.pdf_path %}
-            <span class="inline-flex items-center gap-1 text-xs text-green-600 font-label font-semibold">
-              <span class="material-symbols-outlined text-sm">check_circle</span> PDF saved
-            </span>
+            <a href="/pdf/{{ a.id }}" target="_blank"
+               class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded bg-primary text-white hover:bg-primary-container transition-colors">
+              <span class="material-symbols-outlined text-sm">picture_as_pdf</span> View PDF
+            </a>
             {% else %}
             <span class="inline-flex items-center gap-1 text-xs text-amber-500 font-label font-semibold">
               <span class="material-symbols-outlined text-sm">pending</span> Downloading…
             </span>
             {% endif %}
             <a href="{{ a.url }}" target="_blank"
-               class="text-xs text-primary font-semibold flex items-center gap-1 hover:underline">
-              <span class="material-symbols-outlined text-sm">open_in_new</span> Open article
+               class="text-xs text-slate-500 font-semibold flex items-center gap-1 hover:underline">
+              <span class="material-symbols-outlined text-sm">open_in_new</span> Article page
             </a>
           </div>
         </div>

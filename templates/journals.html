@@ -137,12 +137,23 @@
               <span class="material-symbols-outlined text-sm">{% if in_rl %}mark_email_read{% else %}mail{% endif %}</span>
               {% if in_rl %}In list{% else %}Reading list{% endif %}
             </button>
-            <!-- PDF download -->
+            {% set dl_article_id = downloaded_article_map.get(a.id) %}
+            {% if dl_article_id %}
+            <!-- Already downloaded — link directly to PDF -->
+            <a href="/pdf/{{ dl_article_id }}" target="_blank"
+               onclick="event.stopPropagation()"
+               class="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors">
+              <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
+              View PDF
+            </a>
+            {% else %}
+            <!-- Not yet downloaded -->
             <button onclick="event.stopPropagation(); downloadPdf('{{ a.doi or a.url }}', {{ a.id }}, this)"
               class="pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-primary text-white hover:bg-primary-container transition-colors">
               <span class="material-symbols-outlined text-sm">download</span>
               PDF
             </button>
+            {% endif %}
           </div>
         </div>
         <!-- Expanded: abstract -->
@@ -152,11 +163,20 @@
           {% else %}
           <p class="text-sm text-slate-400 italic border-t border-slate-100 pt-3">No abstract available.</p>
           {% endif %}
-          <a href="{{ a.url }}" target="_blank"
-             class="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline">
-            <span class="material-symbols-outlined text-sm">open_in_new</span>
-            Open article page
-          </a>
+          <div class="flex items-center gap-4 mt-2">
+            <a href="{{ a.url }}" target="_blank"
+               class="inline-flex items-center gap-1 text-xs text-slate-500 hover:underline">
+              <span class="material-symbols-outlined text-sm">open_in_new</span>
+              Article page
+            </a>
+            {% if downloaded_article_map.get(a.id) %}
+            <a href="/pdf/{{ downloaded_article_map.get(a.id) }}" target="_blank"
+               class="inline-flex items-center gap-1 text-xs text-green-700 font-semibold hover:underline">
+              <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
+              View PDF
+            </a>
+            {% endif %}
+          </div>
         </div>
       </div>
       {% else %}

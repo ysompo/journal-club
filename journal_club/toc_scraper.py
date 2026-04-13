@@ -168,6 +168,34 @@ def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
         return TocResult(issue_label="")
 
 
+def _enrich_abstracts(articles: list[dict], issn: str) -> None:
+    """
+    Fill in missing abstracts by querying PubMed for the journal's most recent
+    articles and matching by DOI.  Called after HTML scraping, which never
+    populates the abstract field.  Silently no-ops if PubMed returns nothing or
+    if all articles already have abstracts.
+    """
+    dois_missing = {a["doi"] for a in articles if a.get("doi") and not a.get("abstract")}
+    if not dois_missing:
+        return
+    try:
+        pm = scrape_via_pubmed(issn)   # 40 most-recent articles with abstracts
+        lookup = {
+            a["doi"]: a["abstract"]
+            for a in pm.articles
+            if a.get("doi") and a.get("abstract")
+        }
+        n = 0
+        for art in articles:
+            if art.get("doi") and not art.get("abstract") and art["doi"] in lookup:
+                art["abstract"] = lookup[art["doi"]]
+                n += 1
+        if n:
+            print(f"   [TOC] Abstract enrichment: filled {n}/{len(articles)} via PubMed")
+    except Exception as e:
+        print(f"   [TOC] Abstract enrichment error: {e}")
+
+
 def scrape(
     publisher: str,
     toc_url: str,
@@ -227,6 +255,9 @@ def scrape(
         if not result.articles and issn:
             print(f"   [TOC] HTML parse returned 0 articles — trying PubMed fallback (ISSN {issn})")
             return scrape_via_pubmed(issn)
+        # Enrich abstracts for HTML-scraped articles (parsers return empty abstract)
+        if result.articles and issn:
+            _enrich_abstracts(result.articles, issn)
         return result
 
     # Hybrid mode: append PubMed back-issues to HTML current issue
@@ -237,8 +268,22 @@ def scrape(
     pubmed_result = scrape_via_pubmed(issn, reldate=reldate)
 
     if not result.articles:
-        # HTML yielded nothing; use full PubMed result
+        # HTML yielded nothing; use full PubMed result (already has abstracts)
         return pubmed_result
+
+    # Use PubMed abstracts to enrich HTML articles (avoids a second API round-trip)
+    pm_abstracts = {
+        a["doi"]: a["abstract"]
+        for a in pubmed_result.articles
+        if a.get("doi") and a.get("abstract")
+    }
+    n_enriched = 0
+    for art in result.articles:
+        if art.get("doi") and not art.get("abstract") and art["doi"] in pm_abstracts:
+            art["abstract"] = pm_abstracts[art["doi"]]
+            n_enriched += 1
+    if n_enriched:
+        print(f"   [TOC] Hybrid: enriched {n_enriched} HTML abstracts from PubMed back-issue data")
 
     # Merge: HTML articles take precedence; skip PubMed duplicates by DOI or URL
     current_dois = {a["doi"] for a in result.articles if a.get("doi")}

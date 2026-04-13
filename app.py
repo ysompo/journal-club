@@ -11,7 +11,7 @@ import threading
 import functools
 import secrets
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from journal_club.config import Config, load_config
@@ -129,6 +129,21 @@ def article(article_id: int):
     return render_template("article.html", article=a, page="history")
 
 
+@app.route("/pdf/<int:article_id>")
+def serve_pdf(article_id: int):
+    """Serve the downloaded PDF file for an article."""
+    a = storage.get_by_id(article_id)
+    if a is None:
+        return "Article not found", 404
+    pdf_path = a.get("pdf_path")
+    if not pdf_path:
+        return "PDF not yet downloaded", 404
+    import os
+    if not os.path.exists(pdf_path):
+        return "PDF file not found on disk", 404
+    return send_file(pdf_path, mimetype="application/pdf")
+
+
 @app.route("/download", methods=["POST"])
 def download():
     """
@@ -198,6 +213,7 @@ def journals():
         selected_id = followed[0]["id"]
     toc_articles = storage.get_toc_articles(selected_id) if selected_id else []
     reading_list_ids = storage.get_reading_list_ids()
+    downloaded_article_map = storage.get_downloaded_toc_article_map(selected_id) if selected_id else {}
     selected_journal = next((j for j in followed if j["id"] == selected_id), None)
     return render_template(
         "journals.html",
@@ -208,6 +224,7 @@ def journals():
         selected_journal=selected_journal,
         toc_articles=toc_articles,
         reading_list_ids=reading_list_ids,
+        downloaded_article_map=downloaded_article_map,
     )
 
 
