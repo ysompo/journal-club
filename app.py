@@ -212,7 +212,21 @@ def serve_pdf(article_id: int):
     import os
     if not os.path.exists(pdf_path):
         return "PDF file not found on disk", 404
-    return send_file(pdf_path, mimetype="application/pdf")
+
+    # Check if download is requested via query parameter
+    download_param = request.args.get("download")
+    as_attachment = download_param == "1"
+
+    # Generate filename from title or use default
+    filename = None
+    if as_attachment:
+        title = a.get("title", "article")
+        # Clean title for filename (remove special characters)
+        filename = "".join(c if c.isalnum() or c in " -_" else "" for c in title)
+        filename = filename.strip()[:100] or "article"  # Max 100 chars
+        filename += ".pdf"
+
+    return send_file(pdf_path, mimetype="application/pdf", as_attachment=as_attachment, download_name=filename)
 
 
 @app.route("/download", methods=["POST"])

@@ -367,14 +367,27 @@ function pollDownload(articleId, btn) {
       .then(data => {
         if (data.status === 'done') {
           clearInterval(poll);
-          // Replace button with a green "View PDF" link
-          const link = document.createElement('a');
-          link.href = './pdf/' + articleId;
-          link.target = '_blank';
-          link.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors';
-          link.innerHTML = '<span class="material-symbols-outlined text-sm">picture_as_pdf</span> View PDF';
-          link.onclick = function(e) { e.stopPropagation(); };
-          btn.replaceWith(link);
+          // Replace button with View PDF + Download PDF buttons
+          const container = document.createElement('div');
+          container.className = 'flex items-center gap-1';
+          container.onclick = function(e) { e.stopPropagation(); };
+
+          // View PDF button
+          const viewLink = document.createElement('a');
+          viewLink.href = './pdf/' + articleId;
+          viewLink.target = '_blank';
+          viewLink.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors';
+          viewLink.innerHTML = '<span class="material-symbols-outlined text-sm">picture_as_pdf</span> View';
+
+          // Download PDF button
+          const downloadLink = document.createElement('a');
+          downloadLink.href = './pdf/' + articleId + '?download=1';
+          downloadLink.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors';
+          downloadLink.innerHTML = '<span class="material-symbols-outlined text-sm">download</span> Download';
+
+          container.appendChild(viewLink);
+          container.appendChild(downloadLink);
+          btn.replaceWith(container);
         }
       })
       .catch(() => {});  // silently retry on network blip
