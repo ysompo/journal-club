@@ -313,12 +313,18 @@ def remove_from_reading_list(toc_article_id: int) -> None:
 
 
 def link_reading_list_to_article(toc_article_id: int, article_id: int) -> None:
-    """Call this after a TOC article's PDF download completes."""
+    """
+    Call this after a TOC article's PDF download completes.
+    Creates a reading_list entry if one doesn't exist (article downloaded
+    directly via PDF button without being added to reading list first).
+    """
+    now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
-        conn.execute(
-            "UPDATE reading_list SET article_id = ? WHERE toc_article_id = ?",
-            (article_id, toc_article_id),
-        )
+        conn.execute("""
+            INSERT INTO reading_list (toc_article_id, article_id, added_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(toc_article_id) DO UPDATE SET article_id = ?
+        """, (toc_article_id, article_id, now, article_id))
 
 
 def get_reading_list() -> list[dict]:
