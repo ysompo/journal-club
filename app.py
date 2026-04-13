@@ -521,8 +521,38 @@ def admin_access_requests():
 @app.route("/admin/access-requests/<int:request_id>/approve", methods=["POST"])
 @require_admin
 def admin_approve_request(request_id: int):
-    """Approve an access request."""
+    """Approve an access request and send email with access password."""
+    requests = storage.get_access_requests()
+    req = next((r for r in requests if r["id"] == request_id), None)
+    if not req:
+        return jsonify({"error": "Request not found"}), 404
+
     storage.approve_access_request(request_id)
+
+    # Send approval email with access password if Resend is configured
+    rc = get_runtime_config()
+    if rc.resend_api_key and rc.resend_from and req["email"]:
+        try:
+            from resend import Resend
+            client = Resend(api_key=rc.resend_api_key)
+            client.emails.send({
+                "from": rc.resend_from,
+                "to": req["email"],
+                "subject": "Your Journal Club Access Approved",
+                "html": f"""
+                <h2>Welcome to Journal Club!</h2>
+                <p>Your access request has been approved.</p>
+                <p>You can now log in using this access password:</p>
+                <p style="font-size: 18px; font-weight: bold; font-family: monospace; background: #f0f0f0; padding: 10px; border-radius: 4px;">
+                    {rc.journal_access_password}
+                </p>
+                <p><a href="https://labor-ai.org/tools/journal-club">Visit Journal Club</a></p>
+                <p>Keep this password safe and do not share it.</p>
+                """,
+            })
+        except Exception as e:
+            print(f"[Email] Failed to send approval email: {e}")
+
     return jsonify({"status": "approved"})
 
 
