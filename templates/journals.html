@@ -110,6 +110,7 @@
     <div class="px-6 py-4 space-y-2" id="toc-list">
       {% for a in toc_articles %}
       {% set in_rl = a.id in reading_list_ids %}
+      {% set sent_at = reading_list_sent_dates.get(a.id) %}
       <div class="toc-article border border-slate-200 rounded-lg bg-white" data-id="{{ a.id }}">
         <!-- Collapsed row -->
         <div class="px-4 py-3 flex items-start gap-3 cursor-pointer hover:bg-slate-50 transition-colors"
@@ -128,7 +129,15 @@
             {% endif %}
           </div>
           <div class="flex items-center gap-2 flex-shrink-0 mt-0.5">
-            <!-- Reading list toggle -->
+            <!-- Reading list toggle / Sent status -->
+            {% if sent_at %}
+            <button disabled
+              class="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+              title="Sent on {{ sent_at[:10] }}">
+              <span class="material-symbols-outlined text-sm">check_circle</span>
+              Sent {{ sent_at[:10] }}
+            </button>
+            {% else %}
             <button onclick="event.stopPropagation(); toggleReadingList({{ a.id }}, this)"
               class="rl-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold border transition-colors
                      {% if in_rl %}bg-primary/10 text-primary border-primary/30{% else %}border-slate-200 text-slate-500 hover:border-primary hover:text-primary{% endif %}"
@@ -137,6 +146,7 @@
               <span class="material-symbols-outlined text-sm">{% if in_rl %}mark_email_read{% else %}mail{% endif %}</span>
               {% if in_rl %}In list{% else %}Reading list{% endif %}
             </button>
+            {% endif %}
             {% set dl_article_id = downloaded_article_map.get(a.id) %}
             {% if dl_article_id %}
             <!-- Already downloaded — link directly to PDF -->
@@ -388,9 +398,9 @@ function emailReadingList() {
       } else {
         btn.innerHTML = '<span class="material-symbols-outlined text-base">check_circle</span> Sent!';
         setTimeout(() => {
-          btn.disabled = false;
-          btn.innerHTML = '<span class="material-symbols-outlined text-base">mail</span> Email reading list';
-        }, 3000);
+          // Refresh page to show sent items with "Sent on DATE" status
+          window.location.reload();
+        }, 1500);
       }
     });
 }

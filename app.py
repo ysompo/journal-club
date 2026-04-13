@@ -224,6 +224,7 @@ def journals():
         selected_id = followed[0]["id"]
     toc_articles = storage.get_toc_articles(selected_id) if selected_id else []
     reading_list_ids = storage.get_reading_list_ids()
+    reading_list_sent_dates = storage.get_reading_list_sent_dates()
     downloaded_article_map = storage.get_downloaded_toc_article_map(selected_id) if selected_id else {}
     selected_journal = next((j for j in followed if j["id"] == selected_id), None)
     return render_template(
@@ -235,6 +236,7 @@ def journals():
         selected_journal=selected_journal,
         toc_articles=toc_articles,
         reading_list_ids=reading_list_ids,
+        reading_list_sent_dates=reading_list_sent_dates,
         downloaded_article_map=downloaded_article_map,
     )
 
@@ -351,6 +353,7 @@ def reading_list_email():
             from_addr=rc.resend_from,
             to_addrs=to_addrs,
         )
+        storage.mark_reading_list_sent()
         return jsonify({"status": "sent", "articles": len(items), "pdfs_attached": attached})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

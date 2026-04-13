@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS reading_list (
     toc_article_id INTEGER NOT NULL REFERENCES toc_articles(id) ON DELETE CASCADE,
     article_id     INTEGER REFERENCES articles(id) ON DELETE SET NULL,
     added_at       TEXT NOT NULL,
+    sent_at        TEXT,          -- ISO-8601 timestamp when article was sent via email
     UNIQUE(toc_article_id)
 );
 
@@ -81,6 +82,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "issues_to_fetch" not in cols:
         conn.execute(
             "ALTER TABLE journals ADD COLUMN issues_to_fetch INTEGER NOT NULL DEFAULT 1"
+        )
+
+    rl_cols = {row[1] for row in conn.execute("PRAGMA table_info(reading_list)")}
+    if "sent_at" not in rl_cols:
+        conn.execute(
+            "ALTER TABLE reading_list ADD COLUMN sent_at TEXT"
         )
 
 
@@ -329,12 +336,12 @@ def link_reading_list_to_article(toc_article_id: int, article_id: int) -> None:
 
 def get_reading_list() -> list[dict]:
     """
-    Returns reading list entries joined with toc_article and journal info,
+    Returns unsent reading list entries joined with toc_article and journal info,
     and optionally the article pdf_path if downloaded.
     """
     with _connect() as conn:
         rows = conn.execute("""
-            SELECT rl.id, rl.toc_article_id, rl.article_id, rl.added_at,
+            SELECT rl.id, rl.toc_article_id, rl.article_id, rl.added_at, rl.sent_at,
                    ta.title, ta.authors, ta.url, ta.doi, ta.article_type, ta.issue_label,
                    j.name AS journal_name,
                    a.pdf_path
@@ -342,6 +349,7 @@ def get_reading_list() -> list[dict]:
             JOIN toc_articles ta ON ta.id = rl.toc_article_id
             JOIN journals j ON j.id = ta.journal_id
             LEFT JOIN articles a ON a.id = rl.article_id
+            WHERE rl.sent_at IS NULL
             ORDER BY rl.added_at DESC
         """).fetchall()
     result = []
@@ -356,10 +364,29 @@ def get_reading_list() -> list[dict]:
 
 
 def get_reading_list_ids() -> set[int]:
-    """Return the set of toc_article_ids currently in the reading list."""
+    """Return the set of toc_article_ids currently in the (unsent) reading list."""
     with _connect() as conn:
-        rows = conn.execute("SELECT toc_article_id FROM reading_list").fetchall()
+        rows = conn.execute("SELECT toc_article_id FROM reading_list WHERE sent_at IS NULL").fetchall()
     return {r["toc_article_id"] for r in rows}
+
+
+def get_reading_list_sent_dates() -> dict[int, str]:
+    """Return {toc_article_id: sent_at} for articles that have been sent."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT toc_article_id, sent_at FROM reading_list WHERE sent_at IS NOT NULL"
+        ).fetchall()
+    return {r["toc_article_id"]: r["sent_at"] for r in rows}
+
+
+def mark_reading_list_sent() -> None:
+    """Mark all unsent reading list entries as sent (call after email is sent)."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reading_list SET sent_at = ? WHERE sent_at IS NULL",
+            (now,),
+        )
 
 
 def get_downloaded_toc_article_map(journal_id: int) -> dict[int, int]:
