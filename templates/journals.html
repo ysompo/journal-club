@@ -345,8 +345,30 @@ function downloadPdf(url, tocArticleId, btn) {
       btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
       return;
     }
-    btn.innerHTML = '<span class="material-symbols-outlined text-sm">check</span> Queued';
+    btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
+    pollDownload(data.article_id, btn);
   });
+}
+
+function pollDownload(articleId, btn) {
+  const poll = setInterval(() => {
+    fetch('/download/status/' + articleId)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'done') {
+          clearInterval(poll);
+          // Replace button with a green "View PDF" link
+          const link = document.createElement('a');
+          link.href = '/pdf/' + articleId;
+          link.target = '_blank';
+          link.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors';
+          link.innerHTML = '<span class="material-symbols-outlined text-sm">picture_as_pdf</span> View PDF';
+          link.onclick = function(e) { e.stopPropagation(); };
+          btn.replaceWith(link);
+        }
+      })
+      .catch(() => {});  // silently retry on network blip
+  }, 3000);
 }
 
 // ── Email reading list ────────────────────────────────────────────────────────

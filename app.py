@@ -191,6 +191,17 @@ def download():
     })
 
 
+@app.route("/download/status/<int:article_id>")
+def download_status(article_id: int):
+    """Poll this after /download to know when the PDF is ready."""
+    art = storage.get_by_id(article_id)
+    if not art:
+        return jsonify({"status": "unknown"}), 404
+    if art.get("pdf_path"):
+        return jsonify({"status": "done", "article_id": article_id})
+    return jsonify({"status": "downloading"})
+
+
 @app.route("/bookmark/<int:article_id>", methods=["POST"])
 def bookmark(article_id: int):
     new_state = storage.toggle_bookmark(article_id)
