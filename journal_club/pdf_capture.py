@@ -16,6 +16,9 @@ def _looks_like_pdf_response(url: str, content_type: str) -> bool:
 def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
     """
     Registers response + download hooks on context and page.
+    Also sets up Playwright route interception for known PDF URL patterns so that
+    Chrome's built-in PDF viewer cannot consume the response body before we read it
+    (CDP's Network.getResponseBody fails once the viewer has processed the bytes).
     Returns a shared list; first element will be the captured PDF bytes when found.
     """
     captured: list[bytes] = []
@@ -34,12 +37,33 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
             if body[:4] == b'%PDF':
                 print(f"   [PDF captured] {len(body):,} bytes from {url[:80]}")
                 captured.append(body)
+            else:
+                print(f"   [PDF response not PDF] first bytes: {body[:40]!r} — {url[:60]}")
         except Exception as e:
-            print(f"   [PDF body error] {e}")
+            # Chrome's built-in PDF viewer consumes response bytes before CDP can
+            # read them back; response.body() raises "No data found" in that case.
+            # Fix: launch Chrome with --disable-pdf-extension so PDFs download.
+            print(f"   [PDF body() failed] {type(e).__name__}: {e} — {url[:60]}")
 
     def on_download(download):
         if captured:
             return
+        print(f"   [Download event] {download.suggested_filename}")
+
+        # Primary: download.path() — returns the file Playwright / CDP already saved.
+        try:
+            file_path = download.path()
+            if file_path and os.path.exists(file_path):
+                with open(file_path, "rb") as f:
+                    body = f.read()
+                if body[:4] == b'%PDF':
+                    print(f"   [PDF via download.path()] {len(body):,} bytes — {download.suggested_filename}")
+                    captured.append(body)
+                    return
+        except Exception as e:
+            print(f"   [PDF download.path() error] {e}")
+
+        # Fallback: save_as to temp dir.
         tmp = os.path.join(os.environ.get("TEMP", "C:\\Temp"), download.suggested_filename)
         try:
             download.save_as(tmp)
@@ -62,6 +86,7 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
     context.on("page", on_new_page)
     page.on("response", on_response)
     page.on("download", on_download)
+
 
     return captured
 
