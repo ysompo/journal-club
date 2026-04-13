@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS access_requests (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    email      TEXT NOT NULL UNIQUE,
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending, approved, denied
+    requested_at TEXT NOT NULL,
+    approved_at  TEXT
+);
 """
 
 
@@ -435,3 +444,52 @@ def get_all_settings() -> dict[str, str]:
     with _connect() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
     return {r["key"]: r["value"] for r in rows}
+
+
+# ── Access requests (signup approval) ───────────────────────────────────
+
+def add_access_request(name: str, email: str) -> int:
+    """Submit a new access request (signup form). Returns request ID."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO access_requests (name, email, status, requested_at) VALUES (?,?,?,?)",
+            (name, email, "pending", now),
+        )
+        row = conn.execute(
+            "SELECT id FROM access_requests WHERE email = ?", (email,)
+        ).fetchone()
+        return row["id"]
+
+
+def get_access_requests(status: str | None = None) -> list[dict]:
+    """Get all access requests, optionally filtered by status."""
+    with _connect() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM access_requests WHERE status = ? ORDER BY requested_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM access_requests ORDER BY requested_at DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def approve_access_request(request_id: int) -> None:
+    """Approve an access request."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE access_requests SET status = 'approved', approved_at = ? WHERE id = ?",
+            (now, request_id),
+        )
+
+
+def deny_access_request(request_id: int) -> None:
+    """Deny an access request."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE access_requests SET status = 'denied' WHERE id = ?", (request_id,)
+        )

@@ -1,5 +1,6 @@
 # Fill in your HUJI credentials before running
-admin_password: "changeme"   # password for the /admin page
+admin_password: "changeme"                # password for the /admin page
+journal_access_password: "changeme"       # password for users to access Journal Club
 huji_email: "yishai.sompolinsky@mail.huji.ac.il"
 huji_password: "136Fellsway"
 output_dir: "C:\\Users\\ysomp\\OneDrive\\Documents\\Journal Club\\downloads"

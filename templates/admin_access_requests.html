@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Access Requests — Journal Club{% endblock %}
+
+{% block content %}
+<div class="p-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-headline font-bold text-on-surface mb-2">Access Requests</h1>
+    <p class="text-on-surface-variant">Manage user signup requests</p>
+  </div>
+
+  <!-- Pending Requests -->
+  <div class="mb-12">
+    <h2 class="text-xl font-bold text-on-surface mb-4">Pending ({{ pending|length }})</h2>
+    {% if pending %}
+      <div class="space-y-2 bg-surface-container rounded-lg p-4">
+        {% for req in pending %}
+          <div class="flex items-center justify-between p-4 bg-white dark:bg-slate-700 rounded border border-slate-200 dark:border-slate-600">
+            <div>
+              <p class="font-semibold text-on-surface">{{ req.name }}</p>
+              <p class="text-sm text-on-surface-variant">{{ req.email }}</p>
+              <p class="text-xs text-slate-400 mt-1">Requested: {{ req.requested_at }}</p>
+            </div>
+            <div class="flex gap-2">
+              <button
+                onclick="approveRequest({{ req.id }})"
+                class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-sm font-semibold"
+              >
+                Approve
+              </button>
+              <button
+                onclick="denyRequest({{ req.id }})"
+                class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm font-semibold"
+              >
+                Deny
+              </button>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-on-surface-variant text-sm">No pending requests</p>
+    {% endif %}
+  </div>
+
+  <!-- Approved Requests -->
+  <div class="mb-12">
+    <h2 class="text-xl font-bold text-on-surface mb-4">Approved ({{ approved|length }})</h2>
+    {% if approved %}
+      <div class="space-y-2 bg-surface-container rounded-lg p-4">
+        {% for req in approved %}
+          <div class="flex items-center justify-between p-4 bg-white dark:bg-slate-700 rounded border border-green-200 dark:border-green-900">
+            <div>
+              <p class="font-semibold text-on-surface">{{ req.name }}</p>
+              <p class="text-sm text-on-surface-variant">{{ req.email }}</p>
+              <p class="text-xs text-slate-400 mt-1">Approved: {{ req.approved_at }}</p>
+            </div>
+            <div class="text-green-600 font-semibold">✓ Approved</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-on-surface-variant text-sm">No approved requests</p>
+    {% endif %}
+  </div>
+
+  <!-- Denied Requests -->
+  <div>
+    <h2 class="text-xl font-bold text-on-surface mb-4">Denied ({{ denied|length }})</h2>
+    {% if denied %}
+      <div class="space-y-2 bg-surface-container rounded-lg p-4">
+        {% for req in denied %}
+          <div class="flex items-center justify-between p-4 bg-white dark:bg-slate-700 rounded border border-red-200 dark:border-red-900">
+            <div>
+              <p class="font-semibold text-on-surface">{{ req.name }}</p>
+              <p class="text-sm text-on-surface-variant">{{ req.email }}</p>
+              <p class="text-xs text-slate-400 mt-1">Denied</p>
+            </div>
+            <div class="text-red-600 font-semibold">✗ Denied</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-on-surface-variant text-sm">No denied requests</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  async function approveRequest(requestId) {
+    const res = await fetch(`./access-requests/${requestId}/approve`, {
+      method: 'POST',
+    });
+    if (res.ok) {
+      location.reload();
+    } else {
+      alert('Failed to approve request');
+    }
+  }
+
+  async function denyRequest(requestId) {
+    if (confirm('Are you sure you want to deny this request?')) {
+      const res = await fetch(`./access-requests/${requestId}/deny`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert('Failed to deny request');
+      }
+    }
+  }
+</script>
+{% endblock %}

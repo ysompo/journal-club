@@ -15,6 +15,7 @@ class Config:
     email_to_2: str = ""
     email_to_3: str = ""
     admin_password: str = "changeme"
+    journal_access_password: str = "changeme"
 
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -32,4 +33,5 @@ def load_config(path: str = "config.yaml") -> Config:
         email_to_2=data.get("email_to_2", ""),
         email_to_3=data.get("email_to_3", ""),
         admin_password=data.get("admin_password", "changeme"),
+        journal_access_password=data.get("journal_access_password", "changeme"),
     )
