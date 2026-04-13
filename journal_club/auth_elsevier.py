@@ -85,25 +85,62 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     current = page.url
     print(f"   [Elsevier] Landed on: {current[:80]}")
 
-    # ── Strategy 1: navigate directly to /fulltext ─────────────────────────────
-    # On Elsevier journal platform (ajog.org, thelancet.com, etc.), navigating
-    # directly to /fulltext when unauthenticated triggers an auth redirect to
-    # id.elsevier.com (rather than requiring button clicks on the abstract page).
-    if "/abstract" in current:
-        fulltext = current.replace("/abstract", "/fulltext")
-        print(f"   [Elsevier] Navigating to fulltext: {fulltext[:80]}")
-        try:
-            page.goto(fulltext, wait_until="domcontentloaded", timeout=15_000)
-            try:
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                pass
-            time.sleep(2)
-            print(f"   [Elsevier] After fulltext nav: {page.url[:80]}")
-        except Exception as e:
-            print(f"   [Elsevier] Fulltext nav error (may be redirect): {e}")
+    # ── Strategy 1: click "Access through Hebrew University" if visible ────────
+    # ScienceDirect article pages (e.g. /science/article/pii/...) show an
+    # "Access through Hebrew University of Jeru..." button when the institution
+    # is recognized.  This is the fastest auth path — click it first.
+    if not any(d in page.url for d in _AUTH_DOMAINS):
+        dismiss_cookies(page)
+        time.sleep(1)
+        dismiss_cookies(page)  # ScienceDirect often re-shows after JS loads
+        time.sleep(0.5)
 
-    # ── Strategy 2: click access buttons (fallback if still on journal page) ───
+        for sel in [
+            # Institutional access — MUST come before generic "Sign in"
+            "a:has-text('Access through Hebrew University')",
+            "button:has-text('Access through Hebrew University')",
+            "a:has-text('Access through your institution')",
+            "button:has-text('Access through your institution')",
+            "a:has-text('Access through')",
+            "button:has-text('Access through')",
+            # Direct Shibboleth/HUJI links
+            "a[href*='ShibAuth']",
+            "a[href*='entityID=https%3A%2F%2Fidp.huji.ac.il']",
+            "a[href*='entityID=https%3A%2F%2Fidp.cc.huji.ac.il']",
+        ]:
+            try:
+                page.click(sel, timeout=3000)
+                print(f"   [Elsevier] Clicked institutional access: {sel}")
+                time.sleep(3)
+                break
+            except Exception:
+                continue
+
+    # ── Strategy 2: navigate to /fulltext (triggers auth redirect) ─────────────
+    # On Elsevier journal platforms (ajog.org, thelancet.com), navigating
+    # to /fulltext when unauthenticated triggers an auth redirect to
+    # id.elsevier.com.  Works for /abstract URLs and also /science/article/pii.
+    if not any(d in page.url for d in _AUTH_DOMAINS):
+        fulltext_url = None
+        if "/abstract" in current:
+            fulltext_url = current.replace("/abstract", "/fulltext")
+        elif "/science/article/pii/" in current:
+            # ScienceDirect: append /fulltext to the pii URL
+            fulltext_url = current.rstrip("/") + "?ref=pdf"
+        if fulltext_url:
+            print(f"   [Elsevier] Navigating to fulltext: {fulltext_url[:80]}")
+            try:
+                page.goto(fulltext_url, wait_until="domcontentloaded", timeout=15_000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                time.sleep(2)
+                print(f"   [Elsevier] After fulltext nav: {page.url[:80]}")
+            except Exception as e:
+                print(f"   [Elsevier] Fulltext nav error (may be redirect): {e}")
+
+    # ── Strategy 3: click sign-in / access buttons (last resort) ───────────────
     if not any(d in page.url for d in _AUTH_DOMAINS):
         import datetime as _dt
         _ts = _dt.datetime.now().strftime("%H%M%S")
@@ -113,48 +150,35 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
         except Exception:
             pass
 
-        # Dismiss cookie banner again — ScienceDirect shows it after page JS loads
         dismiss_cookies(page)
         time.sleep(0.5)
 
-        # Wait for any sign-in / access button to appear
+        # Wait for any access button to appear
         try:
             page.wait_for_selector(
-                "button:has-text('Sign'), a:has-text('Sign'), "
                 "button:has-text('Access'), a:has-text('Access'), "
+                "button:has-text('Sign'), a:has-text('Sign'), "
                 "button:has-text('Get access'), a:has-text('Get access')",
                 timeout=6000,
             )
         except Exception:
             pass
 
-        # Dismiss again in case banner re-appeared while waiting
         dismiss_cookies(page)
         time.sleep(0.5)
 
         for sel in [
-            # Elsevier header sign-in (current UI)
-            "button:has-text('Sign in')",
-            "a:has-text('Sign in')",
-            "button:has-text('Sign In')",
-            "a:has-text('Sign In')",
-            "[data-aa-button='signIn']",
-            "[data-testid*='sign']",
-            ".sign-in-link",
-            "header >> a:has-text('Sign')",
-            "header >> button:has-text('Sign')",
-            # Institutional access buttons — covers "Access through Hebrew University..."
-            # and generic "Access through your institution"
-            "button:has-text('Access through')",
-            "a:has-text('Access through')",
-            "a:has-text('Access through your institution')",
-            "button:has-text('Access through your institution')",
+            # Institutional access first (most reliable)
             "a:has-text('Log in via your institution')",
+            "a:has-text('Institutional access')",
             "button:has-text('Get access')",
             "a:has-text('Get access')",
-            "a:has-text('Institutional access')",
             "#access-options",
             "button.buybox__btn",
+            # Generic sign-in (last resort — may go to Elsevier login)
+            "button:has-text('Sign in')",
+            "a:has-text('Sign in')",
+            "[data-aa-button='signIn']",
             "a:has-text('Log in')",
             "button:has-text('Log in')",
         ]:
@@ -166,15 +190,15 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
             except Exception:
                 continue
 
-        # If "Get access" opened an on-page panel, click institution link inside it
+        # After clicking, look for institution link in any panel that opened
         if not any(d in page.url for d in _AUTH_DOMAINS):
             for sel in [
-                # Direct HUJI ShibAuth link — bypasses wayfinder entirely
-                "a[href*='ShibAuth']",
-                "a[href*='entityID=https%3A%2F%2Fidp.huji.ac.il']",
-                "a[href*='entityID=https%3A%2F%2Fidp.cc.huji.ac.il']",
+                "a:has-text('Access through Hebrew University')",
+                "button:has-text('Access through Hebrew University')",
                 "a:has-text('Access through your institution')",
                 "button:has-text('Access through your institution')",
+                "a:has-text('Access through')",
+                "button:has-text('Access through')",
                 "a:has-text('Log in via your institution')",
                 "a:has-text('institution')",
                 "a[href*='openathens']",

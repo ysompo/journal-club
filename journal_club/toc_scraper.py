@@ -91,7 +91,9 @@ def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
                 parts = []
                 for node in article.findall(".//Abstract/AbstractText"):
                     label = node.get("Label")
-                    text = (node.text or "").strip()
+                    # Use itertext() to capture text inside child elements
+                    # like <i>, <b>, <sub>, <sup> — node.text alone misses them
+                    text = "".join(node.itertext()).strip()
                     if label and text:
                         parts.append(f"{label}: {text}")
                     elif text:
