@@ -317,50 +317,87 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
 
     print(f"   Authenticated page: {page.title()[:80]}")
 
-    print("\n[Elsevier] Extracting PDF URL from authenticated page...")
-    try:
-        pdf_url = page.evaluate("""() => {
-            const links = Array.from(document.querySelectorAll('a[href]'));
-            const pdf = links.find(a =>
-                (a.href.includes('pdfft') || a.href.includes('/pdf/') ||
-                 a.href.endsWith('.pdf') || a.href.includes('pdf.sciencedirect')) &&
-                (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
-            );
-            return pdf ? pdf.href : null;
-        }""")
-    except Exception as e:
-        print(f"   [Elsevier] PDF URL eval error (page may have navigated): {e}")
-        pdf_url = None
+    from journal_club.pdf_capture import wait_for_pdf
 
-    if pdf_url:
-        print(f"   PDF URL: {pdf_url[:80]}")
-        # Navigate in a new tab so Chrome can execute the Cloudflare JS challenge
-        # ("Preparing your download") before delivering the PDF bytes.
-        # JS fetch() only gets the challenge HTML — the real browser execution loop
-        # is required to solve the proof-of-work and trigger the actual download.
-        # The on_download hook in pdf_capture.py fires once the file arrives.
-        from journal_club.pdf_capture import wait_for_pdf
-        print("   Opening PDF in new tab (waiting up to 90 s for Cloudflare challenge)...")
-        pdf_tab = page.context.new_page()
+    # ── PDF download ───────────────────────────────────────────────────────────
+    # IMPORTANT: Do NOT open the PDF URL in a blank new tab via context.new_page()
+    # + goto().  ScienceDirect's Cloudflare protection checks Referer, opener,
+    # and sec-fetch-* headers.  A blank tab has none of these, causing Cloudflare
+    # to redirect back to the article page without serving the PDF.
+    #
+    # Instead, click the PDF link element on the authenticated page.  This
+    # preserves all headers and triggers a natural browser navigation.  If the
+    # link opens a new tab (target="_blank"), pdf_capture's context.on("page")
+    # handler auto-registers response/download hooks on it.
+
+    print("\n[Elsevier] Downloading PDF from authenticated page...")
+
+    # Try clicking the PDF link element directly (most reliable)
+    _pdf_link_sels = [
+        "a[href*='pdfft']",
+        "a:has-text('View PDF')",
+        "button:has-text('View PDF')",
+        "a:has-text('Download PDF')",
+        "button:has-text('Download PDF')",
+        "a[href*='/pdf/']",
+    ]
+
+    clicked = False
+    for sel in _pdf_link_sels:
         try:
-            pdf_tab.goto(pdf_url, wait_until="commit", timeout=30_000)
-            print(f"   [Elsevier] PDF tab landed on: {pdf_tab.url[:80]}")
-        except Exception as e:
-            print(f"   [Elsevier] PDF tab nav: {e}")
-        wait_for_pdf(captured, timeout_s=90)
-    else:
-        print("   No PDF URL in DOM — clicking PDF button...")
-        for sel in [
-            "a:has-text('View PDF')",
-            "button:has-text('View PDF')",
-            "a:has-text('Download PDF')",
-            "button:has-text('Download PDF')",
-            "a[href*='pdfft']",
-            "a[href$='.pdf']",
-        ]:
-            try:
-                page.click(sel, timeout=5000)
-                print(f"   [Elsevier] Clicked: {sel}")
-                break
-            except Exception:
-                continue
+            page.click(sel, timeout=5000)
+            print(f"   [Elsevier] Clicked PDF link: {sel}")
+            clicked = True
+            break
+        except Exception:
+            continue
+
+    if not clicked:
+        # Fallback: extract URL from DOM and open via window.open (preserves opener)
+        print("   [Elsevier] No clickable PDF link — extracting URL from DOM...")
+        try:
+            pdf_url = page.evaluate("""() => {
+                const links = Array.from(document.querySelectorAll('a[href]'));
+                const pdf = links.find(a =>
+                    (a.href.includes('pdfft') || a.href.includes('/pdf/') ||
+                     a.href.endsWith('.pdf') || a.href.includes('pdf.sciencedirect')) &&
+                    (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
+                );
+                return pdf ? pdf.href : null;
+            }""")
+        except Exception:
+            pdf_url = None
+
+        if pdf_url:
+            print(f"   [Elsevier] Opening via window.open: {pdf_url[:80]}")
+            page.evaluate(f"window.open('{pdf_url}', '_blank')")
+            clicked = True
+        else:
+            print("   [Elsevier] No PDF URL found in DOM")
+
+    if clicked:
+        # Wait for PDF capture from response/download hooks
+        # (hooks auto-registered on new tabs via context.on("page") in pdf_capture)
+        if not wait_for_pdf(captured, timeout_s=60):
+            # If the ScienceDirect Reader opened, try its download button
+            print("   [Elsevier] PDF not captured yet — checking for Reader page...")
+            for p in page.context.pages:
+                if p == page:
+                    continue
+                purl = p.url
+                if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets', 'pdf')):
+                    print(f"   [Elsevier] Found PDF/Reader page: {purl[:80]}")
+                    for dl_sel in [
+                        "button[title='Download']",
+                        "button:has-text('Download')",
+                        "a:has-text('Download')",
+                        "#download-btn",
+                    ]:
+                        try:
+                            p.click(dl_sel, timeout=5000)
+                            print(f"   [Elsevier] Clicked reader download: {dl_sel}")
+                            break
+                        except Exception:
+                            continue
+                    break
+            wait_for_pdf(captured, timeout_s=30)

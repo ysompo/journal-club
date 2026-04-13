@@ -54,34 +54,38 @@ def check_open_access(page: Page, context: BrowserContext,
 
     print(f"   [OA Check] Found PDF link: {pdf_href[:80]}")
 
-    # Open in a new tab — lets Chrome handle the Cloudflare JS challenge
-    # ("Preparing your download") and any redirect chain before delivering the PDF.
-    # The on_download hook in pdf_capture.py will fire once the file arrives.
-    pdf_tab = None
-    try:
-        pdf_tab = context.new_page()
-        pdf_tab.goto(pdf_href, wait_until="commit", timeout=30_000)
-        print(f"   [OA Check] Tab landed on: {pdf_tab.url[:80]}")
-    except Exception as e:
-        print(f"   [OA Check] Navigation error: {e}")
+    # Click the PDF link element on the page instead of navigating in a blank
+    # new tab.  Clicking preserves Referer and sec-fetch-* headers, which
+    # Cloudflare/ScienceDirect require — a blank tab gets redirected back.
+    # pdf_capture's context.on("page") auto-registers hooks on any new tab.
+    clicked = False
+    for sel in [
+        f"a[href='{pdf_href}']",
+        f"a[href*='{pdf_href.split('/')[-1][:30]}']",
+        "a:has-text('View PDF')",
+        "a:has-text('Download PDF')",
+        "a[href$='.pdf']",
+        "a[href*='/pdf']",
+    ]:
+        try:
+            page.click(sel, timeout=5000)
+            print(f"   [OA Check] Clicked PDF link: {sel}")
+            clicked = True
+            break
+        except Exception:
+            continue
+
+    if not clicked:
+        # Fallback: open via window.open (preserves opener/referer)
+        print(f"   [OA Check] Clicking failed — using window.open")
+        page.evaluate(f"window.open('{pdf_href}', '_blank')")
 
     if not captured:
         wait_for_pdf(captured, timeout_s=timeout_s)
 
     if captured:
         print("   [OA Check] Open access confirmed — PDF captured!")
-        if pdf_tab:
-            try:
-                pdf_tab.close()
-            except Exception:
-                pass
         return True, pdf_href
-
-    if pdf_tab:
-        try:
-            pdf_tab.close()
-        except Exception:
-            pass
 
     print("   [OA Check] PDF not accessible without auth.")
     return False, pdf_href

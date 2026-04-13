@@ -136,9 +136,10 @@ def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
                     doi = aid["value"]
                     break
 
-            # Publisher URL from DOI
-            from journal_club.resolver import _doi_to_url
-            url = _doi_to_url(doi) if doi else f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+            # Use doi.org URL for TOC links — the browser follows redirects.
+            # Do NOT call resolver._doi_to_url here: it calls _elsevier_resolve
+            # which makes 2-3 HTTP requests per DOI and times out for 40+ articles.
+            url = f"https://doi.org/{doi}" if doi else f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
 
             authors = [
                 a["name"] for a in doc.get("authors", [])

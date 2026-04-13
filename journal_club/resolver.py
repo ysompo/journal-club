@@ -182,10 +182,7 @@ def _doi_to_url(doi: str) -> str:
     if "10.1093" in doi:             # OUP (academic.oup.com)
         return f"https://doi.org/{doi}"
     if "10.1016" in doi or "10.1053" in doi:   # Elsevier / ScienceDirect
-        # Don't call _elsevier_resolve here — it makes 2-3 HTTP requests per DOI
-        # which causes timeouts when scraping 40+ articles.  The browser follows
-        # doi.org redirects fine; _elsevier_resolve is only for the download flow.
-        return f"https://doi.org/{doi}"
+        return _elsevier_resolve(doi)
     if "10.1038" in doi:             # Nature
         return f"https://www.nature.com/articles/{doi.split('/')[-1]}"
     if "10.1007" in doi:             # Springer
