@@ -28,6 +28,10 @@ def send_reading_list(
     """
     resend.api_key = api_key
 
+    # Auto-fix bare domain (e.g. "labor-ai.org" → "Journal Club <noreply@labor-ai.org>")
+    if from_addr and "@" not in from_addr and "." in from_addr:
+        from_addr = f"Journal Club <noreply@{from_addr}>"
+
     # ── Build HTML body ───────────────────────────────────────────────────────
     rows = []
     for i, a in enumerate(articles, 1):
