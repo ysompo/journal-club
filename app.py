@@ -23,6 +23,13 @@ import journal_club.storage as storage
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)   # ephemeral — sessions reset on restart (fine for local use)
+
+# Support deployment behind a reverse proxy at /tools/journal-club
+import os
+script_name = os.environ.get("SCRIPT_NAME", "")
+if script_name:
+    app.config["APPLICATION_ROOT"] = script_name
+
 cfg = load_config("config.yaml")
 
 
