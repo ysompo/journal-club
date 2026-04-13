@@ -13,7 +13,7 @@ import time
 import re
 
 from journal_club.config import load_config, Config
-from journal_club.browser import launch_browser
+from journal_club.browser import launch_browser, set_download_behavior
 from journal_club.pdf_capture import attach_pdf_hooks, save_pdf, wait_for_pdf
 from journal_club.auth_oa_check import check_open_access
 from journal_club.router import detect_publisher, Publisher
@@ -57,54 +57,61 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
 
     captured = []
 
-    # ── 2. Browser session ────────────────────────────────────────────────────
-    with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
-        captured = attach_pdf_hooks(context, page)
+    # ── 2. Browser session (up to 2 attempts) ────────────────────────────────
+    for attempt in range(1, 3):
+        if attempt > 1:
+            print(f"\n[Retry] Attempt {attempt} — PDF not captured, retrying browser session...")
+            time.sleep(3)
+            captured = []
 
-        page.goto(article_url, wait_until="domcontentloaded")
-        time.sleep(3)
+        with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
+            captured = attach_pdf_hooks(context, page)
+            set_download_behavior(context, page, cfg.output_dir)
 
-        oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
+            page.goto(article_url, wait_until="domcontentloaded")
+            time.sleep(3)
 
-        if not oa_ok:
-            auth_kwargs = dict(
-                page=page,
-                article_url=article_url,
-                email=cfg.huji_email,
-                password=cfg.huji_password,
-                captured=captured,
-            )
-            auth_pdf_url = None
-            if publisher == Publisher.JAMA:
-                authenticate_jama(**auth_kwargs)
-            elif publisher == Publisher.OVID:
-                authenticate_ovid(**auth_kwargs)
-            elif publisher == Publisher.ELSEVIER:
-                authenticate_elsevier(**auth_kwargs)
-            elif publisher == Publisher.SPRINGER_NATURE:
-                authenticate_springer(**auth_kwargs)
-            else:  # OPENATHENS_GENERIC
-                auth_pdf_url = authenticate_openathens(**auth_kwargs)
+            oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
 
-            wait_for_pdf(captured, timeout_s=60)
+            if not oa_ok:
+                auth_kwargs = dict(
+                    page=page,
+                    article_url=article_url,
+                    email=cfg.huji_email,
+                    password=cfg.huji_password,
+                    captured=captured,
+                )
+                auth_pdf_url = None
+                if publisher == Publisher.JAMA:
+                    authenticate_jama(**auth_kwargs)
+                elif publisher == Publisher.OVID:
+                    authenticate_ovid(**auth_kwargs)
+                elif publisher == Publisher.ELSEVIER:
+                    authenticate_elsevier(**auth_kwargs)
+                elif publisher == Publisher.SPRINGER_NATURE:
+                    authenticate_springer(**auth_kwargs)
+                else:  # OPENATHENS_GENERIC
+                    auth_pdf_url = authenticate_openathens(**auth_kwargs)
 
-            fallback_url = pdf_url or auth_pdf_url
-            if not captured and fallback_url:
-                pdf_url = fallback_url
-            if not captured and pdf_url:
-                print(f"\n[Fallback] Navigating directly to PDF URL after auth...")
-                print(f"   {pdf_url[:80]}")
-                try:
-                    pdf_tab = context.new_page()
-                    pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
-                    wait_for_pdf(captured, timeout_s=30)
-                except Exception as e:
-                    print(f"   Fallback error: {e}")
+                wait_for_pdf(captured, timeout_s=15)
 
-        try:
-            input("\nPress Enter to close Chrome...")
-        except EOFError:
-            pass
+                fallback_url = pdf_url or auth_pdf_url
+                if not captured and fallback_url:
+                    pdf_url = fallback_url
+                if not captured and pdf_url:
+                    print(f"\n[Fallback] Navigating directly to PDF URL after auth...")
+                    print(f"   {pdf_url[:80]}")
+                    try:
+                        pdf_tab = context.new_page()
+                        pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+                        wait_for_pdf(captured, timeout_s=45)
+                    except Exception as e:
+                        print(f"   Fallback error: {e}")
+
+            time.sleep(5)  # grace period for in-flight PDF downloads
+
+        if captured:
+            break
 
     # ── 3. Save PDF ───────────────────────────────────────────────────────────
     # Called AFTER browser closes so Chrome extension bytes fired during
