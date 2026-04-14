@@ -99,6 +99,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE reading_list ADD COLUMN sent_at TEXT"
         )
 
+    art_cols = {row[1] for row in conn.execute("PRAGMA table_info(articles)")}
+    if "pub_date" not in art_cols:
+        conn.execute("ALTER TABLE articles ADD COLUMN pub_date TEXT")
+    if "abstract" not in art_cols:
+        conn.execute("ALTER TABLE articles ADD COLUMN abstract TEXT")
+    if "is_bookmarked" not in art_cols:
+        conn.execute(
+            "ALTER TABLE articles ADD COLUMN is_bookmarked INTEGER NOT NULL DEFAULT 0"
+        )
+    if "download_error" not in art_cols:
+        conn.execute("ALTER TABLE articles ADD COLUMN download_error TEXT")
+
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(_DB_PATH))
@@ -157,6 +169,15 @@ def update_pdf_path(article_id: int, pdf_path: str) -> None:
         conn.execute(
             "UPDATE articles SET pdf_path = ?, downloaded_at = ? WHERE id = ?",
             (pdf_path, datetime.now(timezone.utc).isoformat(), article_id),
+        )
+
+
+def set_download_error(article_id: int, error: str) -> None:
+    """Record (or clear) a download failure message on an article row."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE articles SET download_error = ? WHERE id = ?",
+            (error or None, article_id),
         )
 
 

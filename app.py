@@ -7,6 +7,8 @@ Then open http://localhost:5000
 from __future__ import annotations
 
 import threading
+import logging
+from logging.handlers import RotatingFileHandler
 
 import functools
 import secrets
@@ -31,6 +33,13 @@ if script_name:
     app.config["APPLICATION_ROOT"] = script_name
 
 cfg = load_config("config.yaml")
+
+if not app.debug:
+    _log_handler = RotatingFileHandler("journal_club.log", maxBytes=1_000_000, backupCount=3)
+    _log_handler.setLevel(logging.WARNING)
+    _log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    app.logger.addHandler(_log_handler)
+    app.logger.setLevel(logging.WARNING)
 
 
 def require_admin(f):
@@ -252,19 +261,29 @@ def download():
     if not _download_lock.acquire(blocking=False):
         return jsonify({"error": "A download is already in progress — please wait for it to finish."}), 409
 
-    article_id = storage.save_article(meta, pdf_path=None)
-
-    runtime_cfg = get_runtime_config()
+    try:
+        article_id = storage.save_article(meta, pdf_path=None)
+        runtime_cfg = get_runtime_config()
+    except Exception as e:
+        _download_lock.release()
+        app.logger.error("Download setup failed: %s", e, exc_info=True)
+        return jsonify({"error": f"Server error while preparing download: {e}"}), 500
 
     def _run():
         try:
+            storage.set_download_error(article_id, "")  # clear any prior error on retry
+            if not runtime_cfg.huji_email or not runtime_cfg.huji_password:
+                raise ValueError(
+                    "HUJI credentials not configured — go to Settings to enter your email and password."
+                )
             from download import download_article
             _, pdf_path = download_article(meta.url, runtime_cfg)
             storage.update_pdf_path(article_id, pdf_path)
             if toc_article_id:
                 storage.link_reading_list_to_article(toc_article_id, article_id)
         except Exception as e:
-            print(f"[Download thread] Error: {e}")
+            app.logger.error("[Download thread] article_id=%s error: %s", article_id, e, exc_info=True)
+            storage.set_download_error(article_id, str(e))
         finally:
             _download_lock.release()
 
@@ -286,6 +305,8 @@ def download_status(article_id: int):
         return jsonify({"status": "unknown"}), 404
     if art.get("pdf_path"):
         return jsonify({"status": "done", "article_id": article_id})
+    if art.get("download_error"):
+        return jsonify({"status": "failed", "error": art["download_error"]})
     return jsonify({"status": "downloading"})
 
 

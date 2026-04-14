@@ -388,6 +388,16 @@ function pollDownload(articleId, btn) {
           container.appendChild(viewLink);
           container.appendChild(downloadLink);
           btn.replaceWith(container);
+        } else if (data.status === 'failed') {
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors';
+          btn.title = data.error || 'Download failed';
+          btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
+          setTimeout(() => {
+            btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-primary text-white hover:bg-primary-container transition-colors';
+            btn.innerHTML = '<span class="material-symbols-outlined text-sm">refresh</span> Retry';
+          }, 5000);
         }
       })
       .catch(() => {});  // silently retry on network blip
