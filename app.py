@@ -52,15 +52,6 @@ def require_admin(f):
     return wrapper
 
 
-def require_journal_auth(f):
-    """Decorator: redirect to /login if not authenticated as journal user."""
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if not session.get("journal_authenticated"):
-            return redirect(url_for("login", next=request.path))
-        return f(*args, **kwargs)
-    return wrapper
-
 
 def get_runtime_config() -> Config:
     """Return Config with DB settings overriding config.yaml values where set."""
@@ -121,56 +112,7 @@ scheduler.start()
 _download_lock = threading.Lock()
 
 
-# ── Login/Auth routes ─────────────────────────────────────────────────────────
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    """Login/Signup page."""
-    error = None
-    signup_done = False
-    tab = "login"
-
-    if request.method == "POST":
-        tab = request.form.get("tab", "login")
-
-        if tab == "login":
-            access_password = request.form.get("access_password", "").strip()
-            if access_password == cfg.journal_access_password:
-                session["journal_authenticated"] = True
-                return redirect(request.args.get("next") or url_for("journals"))
-            error = "Incorrect access password."
-
-        elif tab == "signup":
-            name = request.form.get("name", "").strip()
-            email = request.form.get("email", "").strip()
-            if not name or not email:
-                error = "Name and email are required."
-            else:
-                try:
-                    storage.add_access_request(name, email)
-                    signup_done = True
-                except Exception as e:
-                    if "UNIQUE constraint failed" in str(e):
-                        error = "This email has already been registered."
-                    else:
-                        error = "An error occurred. Please try again."
-
-    return render_template(
-        "login.html",
-        error=error,
-        signup_done=signup_done,
-        tab=tab,
-    )
-
-
-@app.route("/logout", methods=["POST"])
-def logout():
-    """Logout and redirect to login page."""
-    session.pop("journal_authenticated", None)
-    return redirect(url_for("login"))
-
-
-# ── Existing routes ───────────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -178,27 +120,23 @@ def index():
 
 
 @app.route("/add")
-@require_journal_auth
 def add():
     return render_template("add_article.html", page="add")
 
 
 @app.route("/history")
-@require_journal_auth
 def history():
     articles = storage.get_history()
     return render_template("history.html", articles=articles, page="history")
 
 
 @app.route("/bookmarks")
-@require_journal_auth
 def bookmarks():
     articles = storage.get_bookmarks()
     return render_template("bookmarks.html", articles=articles, page="bookmarks")
 
 
 @app.route("/article/<int:article_id>")
-@require_journal_auth
 def article(article_id: int):
     a = storage.get_by_id(article_id)
     if a is None:
@@ -209,7 +147,6 @@ def article(article_id: int):
 
 
 @app.route("/pdf/<int:article_id>")
-@require_journal_auth
 def serve_pdf(article_id: int):
     """Serve the downloaded PDF file for an article."""
     a = storage.get_by_id(article_id)
@@ -239,7 +176,6 @@ def serve_pdf(article_id: int):
 
 
 @app.route("/download", methods=["POST"])
-@require_journal_auth
 def download():
     """
     Accept JSON {input: "<pmid | doi | url>", toc_article_id: <int|null>}.
@@ -297,7 +233,6 @@ def download():
 
 
 @app.route("/download/status/<int:article_id>")
-@require_journal_auth
 def download_status(article_id: int):
     """Poll this after /download to know when the PDF is ready."""
     art = storage.get_by_id(article_id)
@@ -311,7 +246,6 @@ def download_status(article_id: int):
 
 
 @app.route("/bookmark/<int:article_id>", methods=["POST"])
-@require_journal_auth
 def bookmark(article_id: int):
     new_state = storage.toggle_bookmark(article_id)
     return jsonify({"bookmarked": new_state})
@@ -320,7 +254,6 @@ def bookmark(article_id: int):
 # ── Journals routes ───────────────────────────────────────────────────────────
 
 @app.route("/journals")
-@require_journal_auth
 def journals():
     followed = storage.get_journals()
     followed_urls = {j["toc_url"] for j in followed}
@@ -352,7 +285,6 @@ def journals():
 
 
 @app.route("/journals/add", methods=["POST"])
-@require_journal_auth
 def journals_add():
     data = request.get_json(force=True) or {}
     name = data.get("name", "").strip()
@@ -370,7 +302,6 @@ def journals_add():
 
 
 @app.route("/journals/<int:journal_id>/status")
-@require_journal_auth
 def journals_status(journal_id: int):
     j = storage.get_journal(journal_id)
     if j is None:
@@ -384,7 +315,6 @@ def journals_status(journal_id: int):
 
 
 @app.route("/journals/<int:journal_id>/refresh", methods=["POST"])
-@require_journal_auth
 def journals_refresh(journal_id: int):
     j = storage.get_journal(journal_id)
     if j is None:
@@ -394,7 +324,6 @@ def journals_refresh(journal_id: int):
 
 
 @app.route("/journals/<int:journal_id>/settings", methods=["POST"])
-@require_journal_auth
 def journals_settings(journal_id: int):
     data = request.get_json(silent=True) or {}
     n = data.get("issues_to_fetch")
@@ -407,14 +336,12 @@ def journals_settings(journal_id: int):
 
 
 @app.route("/journals/<int:journal_id>", methods=["DELETE"])
-@require_journal_auth
 def journals_delete(journal_id: int):
     storage.remove_journal(journal_id)
     return jsonify({"status": "removed"})
 
 
 @app.route("/journals/<int:journal_id>/toc")
-@require_journal_auth
 def journals_toc(journal_id: int):
     articles = storage.get_toc_articles(journal_id)
     reading_list_ids = storage.get_reading_list_ids()
@@ -426,14 +353,12 @@ def journals_toc(journal_id: int):
 # ── Reading List routes ───────────────────────────────────────────────────────
 
 @app.route("/reading-list")
-@require_journal_auth
 def reading_list_page():
     items = storage.get_reading_list()
     return jsonify(items)
 
 
 @app.route("/reading-list/add", methods=["POST"])
-@require_journal_auth
 def reading_list_add():
     data = request.get_json(force=True) or {}
     toc_article_id = data.get("toc_article_id")
@@ -444,7 +369,6 @@ def reading_list_add():
 
 
 @app.route("/reading-list/remove", methods=["POST"])
-@require_journal_auth
 def reading_list_remove():
     data = request.get_json(force=True) or {}
     toc_article_id = data.get("toc_article_id")
@@ -455,7 +379,6 @@ def reading_list_remove():
 
 
 @app.route("/reading-list/email", methods=["POST"])
-@require_journal_auth
 def reading_list_email():
     rc = get_runtime_config()
     if not rc.resend_api_key or not rc.resend_from:
@@ -482,7 +405,6 @@ def reading_list_email():
 # ── Settings routes ──────────────────────────────────────────────────────────
 
 @app.route("/settings")
-@require_journal_auth
 def settings():
     s = storage.get_all_settings()
     rc = get_runtime_config()
@@ -490,7 +412,6 @@ def settings():
 
 
 @app.route("/settings", methods=["POST"])
-@require_journal_auth
 def settings_save():
     data = request.get_json(force=True) or {}
     for key in storage._SETTINGS_KEYS:
@@ -535,68 +456,6 @@ def admin_settings_save():
         if key in data:
             storage.set_setting(key, data[key])
     return jsonify({"status": "saved"})
-
-
-@app.route("/admin/access-requests", methods=["GET"])
-@require_admin
-def admin_access_requests():
-    """Admin page for approving/denying signup requests."""
-    pending = storage.get_access_requests(status="pending")
-    approved = storage.get_access_requests(status="approved")
-    denied = storage.get_access_requests(status="denied")
-    return render_template(
-        "admin_access_requests.html",
-        pending=pending,
-        approved=approved,
-        denied=denied,
-        page="admin",
-    )
-
-
-@app.route("/admin/access-requests/<int:request_id>/approve", methods=["POST"])
-@require_admin
-def admin_approve_request(request_id: int):
-    """Approve an access request and send email with access password."""
-    requests = storage.get_access_requests()
-    req = next((r for r in requests if r["id"] == request_id), None)
-    if not req:
-        return jsonify({"error": "Request not found"}), 404
-
-    storage.approve_access_request(request_id)
-
-    # Send approval email with access password if Resend is configured
-    rc = get_runtime_config()
-    if rc.resend_api_key and rc.resend_from and req["email"]:
-        try:
-            from resend import Resend
-            client = Resend(api_key=rc.resend_api_key)
-            client.emails.send({
-                "from": rc.resend_from,
-                "to": req["email"],
-                "subject": "Your Journal Club Access Approved",
-                "html": f"""
-                <h2>Welcome to Journal Club!</h2>
-                <p>Your access request has been approved.</p>
-                <p>You can now log in using this access password:</p>
-                <p style="font-size: 18px; font-weight: bold; font-family: monospace; background: #f0f0f0; padding: 10px; border-radius: 4px;">
-                    {rc.journal_access_password}
-                </p>
-                <p><a href="https://labor-ai.org/tools/journal-club">Visit Journal Club</a></p>
-                <p>Keep this password safe and do not share it.</p>
-                """,
-            })
-        except Exception as e:
-            print(f"[Email] Failed to send approval email: {e}")
-
-    return jsonify({"status": "approved"})
-
-
-@app.route("/admin/access-requests/<int:request_id>/deny", methods=["POST"])
-@require_admin
-def admin_deny_request(request_id: int):
-    """Deny an access request."""
-    storage.deny_access_request(request_id)
-    return jsonify({"status": "denied"})
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
