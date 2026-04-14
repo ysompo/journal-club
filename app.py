@@ -21,6 +21,7 @@ from journal_club.resolver import resolve
 from journal_club.journals_catalog import CATALOG
 from journal_club.toc_scraper import scrape
 from journal_club.mailer import send_reading_list
+from journal_club.logging_config import configure_logging
 import journal_club.storage as storage
 
 app = Flask(__name__)
@@ -34,12 +35,13 @@ if script_name:
 
 cfg = load_config("config.yaml")
 
-if not app.debug:
-    _log_handler = RotatingFileHandler("journal_club.log", maxBytes=1_000_000, backupCount=3)
-    _log_handler.setLevel(logging.WARNING)
-    _log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    app.logger.addHandler(_log_handler)
-    app.logger.setLevel(logging.WARNING)
+# Configure logging: set DEBUG=1 env var for verbose debugging
+debug_mode = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+log_level = logging.DEBUG if debug_mode else logging.INFO
+log_file = "journal_club.log" if not app.debug else None  # log to file in production
+
+configure_logging(log_level=log_level, log_file=log_file)
+app.logger.info(f"Journal Club started (debug={debug_mode}, log_level={logging.getLevelName(log_level)})")
 
 
 def require_admin(f):

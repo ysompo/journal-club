@@ -1,7 +1,10 @@
 # journal_club/pdf_capture.py
 import os
 import time
+import logging
 from playwright.sync_api import BrowserContext, Page
+
+logger = logging.getLogger(__name__)
 
 _SKIP_EXTS = ('.ttf', '.woff', '.otf', '.eot', '.svg', '.css',
               '.js', '.png', '.jpg', '.gif', '.ico')
@@ -35,20 +38,20 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
         try:
             body = response.body()
             if body[:4] == b'%PDF':
-                print(f"   [PDF captured] {len(body):,} bytes from {url[:80]}")
+                logger.info(f"[PDF captured] {len(body):,} bytes from {url[:80]}")
                 captured.append(body)
             else:
-                print(f"   [PDF response not PDF] first bytes: {body[:40]!r} — {url[:60]}")
+                logger.debug(f"[PDF response not PDF] first bytes: {body[:40]!r} — {url[:60]}")
         except Exception as e:
             # Chrome's built-in PDF viewer consumes response bytes before CDP can
             # read them back; response.body() raises "No data found" in that case.
             # Fix: launch Chrome with --disable-pdf-extension so PDFs download.
-            print(f"   [PDF body() failed] {type(e).__name__}: {e} — {url[:60]}")
+            logger.warning(f"[PDF body() failed] {type(e).__name__}: {e} — {url[:60]}")
 
     def on_download(download):
         if captured:
             return
-        print(f"   [Download event] {download.suggested_filename}")
+        logger.debug(f"[Download event] {download.suggested_filename}")
 
         # Primary: download.path() — returns the file Playwright / CDP already saved.
         try:
@@ -57,27 +60,27 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
                 with open(file_path, "rb") as f:
                     body = f.read()
                 if body[:4] == b'%PDF':
-                    print(f"   [PDF via download.path()] {len(body):,} bytes — {download.suggested_filename}")
+                    logger.info(f"[PDF via download.path()] {len(body):,} bytes — {download.suggested_filename}")
                     captured.append(body)
                     return
         except Exception as e:
-            print(f"   [PDF download.path() error] {e}")
+            logger.debug(f"[PDF download.path() error] {e}")
 
         # Fallback: save_as to temp dir.
         tmp = os.path.join(os.environ.get("TEMP", "C:\\Temp"), download.suggested_filename)
         try:
             download.save_as(tmp)
         except Exception as e:
-            print(f"   [PDF download save error] {e}")
+            logger.error(f"[PDF download save error] {e}")
             return
         try:
             with open(tmp, "rb") as f:
                 body = f.read()
             if body[:4] == b'%PDF':
-                print(f"   [PDF via download] {len(body):,} bytes — {download.suggested_filename}")
+                logger.info(f"[PDF via download] {len(body):,} bytes — {download.suggested_filename}")
                 captured.append(body)
         except Exception as e:
-            print(f"   [PDF download read error] {e}")
+            logger.error(f"[PDF download read error] {e}")
 
     def on_new_page(new_page):
         new_page.on("response", on_response)
@@ -94,11 +97,13 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
 def save_pdf(captured: list[bytes], out_path: str) -> bool:
     """Write first captured PDF to out_path. Returns True on success."""
     if not captured:
+        logger.error("[PDF save] No PDF was captured")
         return False
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(captured[0])
-    print(f"   Saved -> {out_path} ({os.path.getsize(out_path):,} bytes)")
+    size = os.path.getsize(out_path)
+    logger.info(f"[PDF save] ✓ Saved {out_path} ({size:,} bytes)")
     return True
 
 
@@ -106,7 +111,9 @@ def wait_for_pdf(captured: list, timeout_s: int = 30) -> bool:
     """Poll until PDF is captured or timeout. Returns True if captured."""
     for remaining in range(timeout_s, 0, -5):
         if captured:
+            logger.info(f"[PDF wait] ✓ PDF captured!")
             return True
-        print(f"   ... waiting {remaining}s")
+        logger.debug(f"[PDF wait] Waiting {remaining}s...")
         time.sleep(5)
+    logger.error(f"[PDF wait] ✗ Timeout after {timeout_s}s — PDF not captured")
     return bool(captured)

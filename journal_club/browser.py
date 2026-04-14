@@ -1,8 +1,11 @@
 # journal_club/browser.py
 import os
 import json
+import logging
 from contextlib import contextmanager
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
+
+logger = logging.getLogger(__name__)
 
 CHROME_PATHS = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -85,37 +88,54 @@ def set_download_behavior(context: BrowserContext, page: Page,
 def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 9222,
                    start_url: str = "about:blank"):
     """
-    Context manager: launches Playwright's bundled Chromium.
+    Context manager: launches Playwright's bundled Chromium with persistent context.
     Yields (playwright, browser, context, page). Cleans up on exit.
     Works on local machines, Render, Docker, and other containerized environments.
 
     Note: chrome_path parameter is ignored (uses bundled Chromium instead).
     """
     os.makedirs(profile_dir, exist_ok=True)
+    logger.debug(f"[Browser] Profile dir: {profile_dir}")
+
     _ensure_pdf_download_preference(profile_dir)
 
-    with sync_playwright() as p:
-        # Use Playwright's bundled Chromium (works everywhere, no system Chrome needed)
-        browser: Browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-pdf-extension",
-                f"--user-data-dir={profile_dir}",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ]
-        )
-        context: BrowserContext = browser.new_context()
-        page: Page = context.new_page()
+    try:
+        with sync_playwright() as p:
+            logger.info("[Browser] Launching Playwright bundled Chromium...")
 
-        try:
-            yield p, browser, context, page
-        finally:
+            # Use launch_persistent_context for better profile management
+            # This replaces the deprecated --user-data-dir argument approach
+            context: BrowserContext = p.chromium.launch_persistent_context(
+                user_data_dir=profile_dir,
+                headless=True,
+                args=[
+                    "--disable-pdf-extension",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ]
+            )
+            logger.info("[Browser] ✓ Chromium launched successfully")
+
+            page: Page = context.new_page()
+            logger.debug("[Browser] New page created")
+
             try:
-                context.close()
-            except Exception:
-                pass
-            try:
-                browser.close()
-            except Exception:
-                pass
+                yield p, context.browser, context, page
+            except Exception as e:
+                logger.error(f"[Browser] Error during page operations: {e}", exc_info=True)
+                raise
+            finally:
+                try:
+                    page.close()
+                    logger.debug("[Browser] Page closed")
+                except Exception as e:
+                    logger.warning(f"[Browser] Error closing page: {e}")
+
+                try:
+                    context.close()
+                    logger.debug("[Browser] Context closed")
+                except Exception as e:
+                    logger.warning(f"[Browser] Error closing context: {e}")
+    except Exception as e:
+        logger.error(f"[Browser] Failed to launch Chromium: {e}", exc_info=True)
+        raise
