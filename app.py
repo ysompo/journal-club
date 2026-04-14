@@ -452,7 +452,7 @@ def admin_settings():
 @require_admin
 def admin_settings_save():
     data = request.get_json(force=True) or {}
-    for key in ["resend_api_key", "resend_from"]:
+    for key in ["huji_email", "huji_password", "resend_api_key", "resend_from"]:
         if key in data:
             storage.set_setting(key, data[key])
     return jsonify({"status": "saved"})

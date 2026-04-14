@@ -12,31 +12,6 @@
     Settings saved
   </div>
 
-  <!-- Download Credentials -->
-  <section class="mb-8">
-    <h2 class="font-headline text-base font-bold text-on-surface mb-1">Download credentials</h2>
-    <p class="text-xs text-slate-400 mb-4">Used to authenticate with HUJI OpenAthens when downloading PDFs.</p>
-    <div class="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
-      <div class="px-5 py-4 flex items-center gap-4">
-        <label class="w-32 text-sm font-semibold text-on-surface-variant flex-shrink-0">Email</label>
-        <input type="email" id="huji_email" value="{{ cfg.huji_email }}"
-          placeholder="yourname@mail.huji.ac.il"
-          class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
-      </div>
-      <div class="px-5 py-4 flex items-center gap-4">
-        <label class="w-32 text-sm font-semibold text-on-surface-variant flex-shrink-0">Password</label>
-        <div class="flex-1 flex gap-2">
-          <input type="password" id="huji_password" value="{{ cfg.huji_password }}"
-            placeholder="••••••••"
-            class="flex-1 bg-transparent border border-slate-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-primary">
-          <button onclick="togglePwd('huji_password', this)" class="text-slate-400 hover:text-slate-600 transition-colors">
-            <span class="material-symbols-outlined text-lg">visibility</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- Recipients -->
   <section class="mb-8">
     <h2 class="font-headline text-base font-bold text-on-surface mb-1">Recipients</h2>
@@ -75,7 +50,7 @@ function togglePwd(id, btn) {
 }
 
 function saveSettings() {
-  const keys = ['huji_email','huji_password','email_to_1','email_to_2','email_to_3'];
+  const keys = ['email_to_1','email_to_2','email_to_3'];
   const data = {};
   keys.forEach(k => { const el = document.getElementById(k); if (el) data[k] = el.value; });
   fetch('/settings', {
