@@ -1,8 +1,6 @@
 # journal_club/browser.py
 import os
 import json
-import subprocess
-import time
 from contextlib import contextmanager
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
@@ -87,37 +85,37 @@ def set_download_behavior(context: BrowserContext, page: Page,
 def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 9222,
                    start_url: str = "about:blank"):
     """
-    Context manager: launches Chrome with remote debugging, yields (playwright, browser, context, page).
-    Cleans up on exit.
+    Context manager: launches Playwright's bundled Chromium.
+    Yields (playwright, browser, context, page). Cleans up on exit.
+    Works on local machines, Render, Docker, and other containerized environments.
+
+    Note: chrome_path parameter is ignored (uses bundled Chromium instead).
     """
     os.makedirs(profile_dir, exist_ok=True)
     _ensure_pdf_download_preference(profile_dir)
-    chrome = find_chrome(chrome_path)
-
-    proc = subprocess.Popen([
-        chrome,
-        f"--remote-debugging-port={port}",
-        f"--user-data-dir={profile_dir}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        # Disable Chrome's built-in PDF viewer so PDFs are downloaded as files
-        # rather than rendered inline.  Inline rendering consumes the response
-        # bytes before CDP can read them back, causing response.body() to fail.
-        "--disable-pdf-extension",
-        start_url,
-    ])
-    time.sleep(4)   # wait for Chrome DevTools protocol to become available
 
     with sync_playwright() as p:
-        browser: Browser = p.chromium.connect_over_cdp(f"http://localhost:{port}")
-        context: BrowserContext = browser.contexts[0] if browser.contexts else browser.new_context()
-        pages = context.pages
-        page: Page = pages[0] if pages else context.new_page()
+        # Use Playwright's bundled Chromium (works everywhere, no system Chrome needed)
+        browser: Browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-pdf-extension",
+                f"--user-data-dir={profile_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ]
+        )
+        context: BrowserContext = browser.new_context()
+        page: Page = context.new_page()
+
         try:
             yield p, browser, context, page
         finally:
             try:
+                context.close()
+            except Exception:
+                pass
+            try:
                 browser.close()
             except Exception:
                 pass
-            proc.terminate()

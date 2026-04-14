@@ -5,7 +5,8 @@ huji_email: "yishai.sompolinsky@mail.huji.ac.il"
 huji_password: "136Fellsway"
 output_dir: "C:\\Users\\ysomp\\OneDrive\\Documents\\Journal Club\\downloads"
 chrome_profile: "C:\\Temp\\chrome-journal-club"
-# chrome_path: ""   # leave empty to auto-detect
+# Note: chrome_path is ignored. The app now uses Playwright's bundled Chromium,
+# which works on local machines, Render, Docker, and other containers.
 
 # Email — Reading List
 email_to: ""          # address to send reading list to
