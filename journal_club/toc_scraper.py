@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
@@ -199,6 +200,47 @@ def _enrich_abstracts(articles: list[dict], issn: str) -> None:
         print(f"   [TOC] Abstract enrichment error: {e}")
 
 
+def scrape_via_toc_pdf(pdf_path: str) -> TocResult:
+    """
+    Parse AJOG TOC PDF and extract article information.
+
+    PDF must have articles structured as:
+    - Section header (EXPERT REVIEWS, SYSTEMATIC REVIEWS, etc.)
+    - Page number
+    - Article title
+    - Author list
+    """
+    try:
+        from journal_club.toc_pdf_parser import parse_toc_pdf
+
+        toc_articles = parse_toc_pdf(pdf_path)
+
+        articles = []
+        issue_labels = set()
+
+        for toc_article in toc_articles:
+            # Convert to standard article format
+            article = {
+                "url": f"https://www.ajog.org/article/page/{toc_article.page_number}",  # Placeholder
+                "title": toc_article.title,
+                "authors": toc_article.authors,
+                "article_type": toc_article.article_type,
+                "doi": None,  # PDF doesn't contain DOIs
+                "abstract": "",
+            }
+            articles.append(article)
+            issue_labels.add(toc_article.page_number)
+
+        # Extract issue label from PDF metadata or use placeholder
+        issue_label = "AJOG April 2026"
+
+        return TocResult(issue_label=issue_label, articles=articles)
+
+    except Exception as e:
+        print(f"   [TOC] PDF parsing error: {e}")
+        return TocResult(issue_label="", articles=[])
+
+
 def scrape(
     publisher: str,
     toc_url: str,
@@ -209,6 +251,8 @@ def scrape(
     """
     Fetch and parse a journal's TOC.
 
+    publisher="toc_pdf" uses a local PDF file (toc_url should be file path).
+
     issues_to_fetch=1 (default): HTML scrape of the current issue; falls back
     to PubMed if HTML yields 0 articles and an ISSN is available.
 
@@ -218,6 +262,14 @@ def scrape(
     HTML-only if none is available.
     """
     reldate = issues_to_fetch * days_per_issue if issues_to_fetch > 1 else 0
+
+    # Handle PDF-based TOC scraping
+    if publisher == "toc_pdf":
+        if Path(toc_url).exists():
+            return scrape_via_toc_pdf(toc_url)
+        else:
+            print(f"   [TOC] PDF file not found: {toc_url}")
+            return TocResult(issue_label="")
 
     try:
         r = requests.get(toc_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
@@ -248,9 +300,17 @@ def scrape(
         "asco":             _parse_generic,
         "blood":            _parse_generic,
         "diabetesjournals": _parse_generic,
+        "elsevier":         _parse_elsevier,
+        "pubmed":           None,  # Skip HTML parsing; go straight to PubMed
     }
 
     parser = parsers.get(publisher, _parse_generic)
+    # If parser is None, skip HTML and go straight to PubMed fallback
+    if parser is None:
+        if issn:
+            return scrape_via_pubmed(issn, reldate=issues_to_fetch * days_per_issue if issues_to_fetch > 1 else 0)
+        return TocResult(issue_label="")
+
     result = parser(soup, toc_url)
 
     if issues_to_fetch == 1:
@@ -506,6 +566,51 @@ def _parse_ahajournals(soup: BeautifulSoup, base_url: str) -> TocResult:
 
 def _parse_jacc(soup: BeautifulSoup, base_url: str) -> TocResult:
     return _parse_generic(soup, base_url, host="https://www.jacc.org")
+
+
+# ── Elsevier-owned journals (AJOG, Fertility & Sterility, etc.) ────────────────
+
+def _parse_elsevier(soup: BeautifulSoup, base_url: str) -> TocResult:
+    """
+    Parse TOC from Elsevier-owned journal sites (ajog.org, fertstert.org, etc.).
+    These sites host links to articles on their own domains, NOT via ScienceDirect redirects.
+    """
+    label_tag = soup.select_one(".issue-header, .vol-issue, .current-issue-meta, h1")
+    issue_label = label_tag.get_text(" ", strip=True) if label_tag else ""
+
+    articles = []
+    seen: set[str] = set()
+
+    # Look for article links in the TOC (typically in article cards or list items)
+    for item in soup.select("article, .article-item, li.toc-item, div.article-card"):
+        title_tag = item.select_one("h3 a, h4 a, .article-title a, .title a")
+        if not title_tag:
+            continue
+        title = title_tag.get_text(strip=True)
+        if len(title) < 10:
+            continue
+        href = title_tag.get("href", "")
+        if not href:
+            continue
+        url = href if href.startswith("http") else f"https://www.ajog.org{href}"
+        if url in seen:
+            continue
+        seen.add(url)
+
+        # Extract DOI from the URL if present
+        doi_match = re.search(r"10\.\d{4,}/\S+", url)
+        doi = doi_match.group(0) if doi_match else None
+
+        authors = [a.get_text(strip=True) for a in item.select(".author-name, .contrib-group a")]
+        atype_tag = item.select_one(".article-type, .content-type")
+        article_type = atype_tag.get_text(strip=True) if atype_tag else ""
+
+        articles.append({
+            "url": url, "title": title, "authors": authors,
+            "article_type": article_type, "doi": doi, "abstract": "",
+        })
+
+    return TocResult(issue_label=_clean_label(issue_label), articles=articles)
 
 
 # ── Generic fallback ──────────────────────────────────────────────────────────
