@@ -109,107 +109,28 @@ def download_ajog_toc_pdf(cfg: Config, metadata: Optional[dict] = None, timeout:
             print("[AJOG PDF] Navigating to ajog.org/current...")
             page.goto("https://www.ajog.org/current", wait_until="networkidle", timeout=20_000)
 
-            # Extract and return the page content for HTML scraping
-            # (Cloudflare blocks direct PDF access, so we use browser-loaded HTML instead)
+            # Extract the page content immediately
             html_content = page.content()
             metadata = extract_issue_metadata(html_content)
 
-            # Check if we already have this issue
+            # Check if we already have this issue cached
             if metadata.get("volume") and metadata.get("issue"):
                 existing = find_existing_pdf(metadata["volume"], metadata["issue"])
-                if existing:
-                    print(f"[AJOG PDF] Already have PDF for this issue: {existing}")
+                if existing and existing.endswith('.txt'):
+                    print(f"[AJOG PDF] Already have cached HTML for this issue: {existing}")
                     return existing
 
-            # Save the HTML content to a special marker file so scraper can use it
-            # This is a workaround for Cloudflare blocking direct PDF access
-            print("[AJOG PDF] Saving page content for HTML parsing (Cloudflare blocks PDF URLs)...")
+            # Save the HTML content to a file for scraper to parse
+            # This is the PRIMARY approach - Cloudflare blocks PDF downloads
+            print("[AJOG PDF] Saving page content for HTML parsing...")
             html_file = pdf_dir / f"ajog_page_html_{metadata.get('volume', 'unknown')}_{metadata.get('issue', 'unknown')}.txt"
             with open(html_file, "w", encoding="utf-8") as f:
                 f.write(html_content)
-            print(f"[AJOG PDF] Saved page HTML to {html_file.name}")
+            file_size = html_file.stat().st_size
+            print(f"[AJOG PDF] ✓ Saved page HTML: {html_file.name} ({file_size:,} bytes)")
 
             # Return special marker to indicate HTML content is available
             return f"html:{html_file}"
-
-            # Try to get the PDF URL from the href attribute
-            pdf_href = pdf_links[0].get_attribute("href")
-            if not pdf_href:
-                print("[AJOG PDF] PDF link has no href")
-                return None
-
-            # Make absolute URL if needed
-            if pdf_href.startswith('/'):
-                pdf_url = "https://www.ajog.org" + pdf_href
-            else:
-                pdf_url = pdf_href
-
-            print(f"[AJOG PDF] PDF URL: {pdf_url}")
-            print("[AJOG PDF] Downloading PDF...")
-
-            # Try multiple strategies to download the PDF
-            download = None
-
-            # Strategy 1: Use click on the PDF link with download interception
-            try:
-                print("[AJOG PDF] Strategy 1: Clicking PDF link with download handler...")
-                with page.expect_download(timeout=30000) as download_info:
-                    pdf_links[0].click(force=True, timeout=10000)
-                download = download_info.value
-                print(f"[AJOG PDF] ✓ Download via click succeeded")
-            except Exception as e:
-                print(f"[AJOG PDF] ✗ Click method failed: {e}")
-
-            # Strategy 2: Use right-click context menu "Save link as"
-            if not download:
-                try:
-                    print("[AJOG PDF] Strategy 2: Right-click context menu...")
-                    with page.expect_download(timeout=30000) as download_info:
-                        pdf_links[0].click(button="right", force=True, timeout=5000)
-                        # Try clicking "Save as" or equivalent in context menu
-                        page.wait_for_timeout(500)
-                        # This approach is unreliable, skip if we get here
-                    download = download_info.value
-                    print(f"[AJOG PDF] ✓ Download via context menu succeeded")
-                except Exception as e:
-                    print(f"[AJOG PDF] ✗ Context menu method failed: {e}")
-
-            # Strategy 3: Fetch PDF directly using page.request with proper headers
-            if not download:
-                try:
-                    print("[AJOG PDF] Strategy 3: Direct fetch with request API...")
-                    # Use the browser's request context to maintain cookies/session
-                    response = page.request.get(pdf_url, timeout=30000)
-                    if response.status == 200:
-                        pdf_data = response.body()
-                        filename = construct_pdf_filename(metadata)
-                        pdf_path = pdf_dir / filename
-
-                        with open(pdf_path, "wb") as f:
-                            f.write(pdf_data)
-
-                        file_size = pdf_path.stat().st_size
-                        print(f"[AJOG PDF] ✓ Downloaded successfully via request API: {pdf_path.name} ({file_size:,} bytes)")
-                        return str(pdf_path)
-                    else:
-                        print(f"[AJOG PDF] ✗ Request returned status {response.status}: {response.text()[:200]}")
-                except Exception as e:
-                    print(f"[AJOG PDF] ✗ Direct fetch failed: {e}")
-
-            if not download:
-                print("[AJOG PDF] ✗ All download strategies failed")
-                return None
-
-            # Save downloaded file
-            filename = construct_pdf_filename(metadata)
-            pdf_path = pdf_dir / filename
-
-            download.save_as(str(pdf_path))
-
-            file_size = pdf_path.stat().st_size
-            print(f"[AJOG PDF] Downloaded successfully: {pdf_path.name} ({file_size:,} bytes)")
-
-            return str(pdf_path)
 
     except Exception as e:
         print(f"[AJOG PDF] Download failed: {e}")
