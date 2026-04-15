@@ -117,7 +117,7 @@ CATALOG: list[CatalogEntry] = [
     ),
     CatalogEntry(
         name="American Journal of Obstetrics and Gynecology",
-        publisher="elsevier",
+        publisher="toc_pdf_auto",
         toc_url="https://www.ajog.org/current",
         issn="0002-9378",
         days_per_issue=30,

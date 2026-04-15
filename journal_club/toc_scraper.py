@@ -271,6 +271,30 @@ def scrape(
             print(f"   [TOC] PDF file not found: {toc_url}")
             return TocResult(issue_label="")
 
+    # Handle automatic PDF downloading and scraping (for AJOG)
+    if publisher == "toc_pdf_auto":
+        try:
+            from journal_club.toc_pdf_downloader import download_ajog_toc_pdf
+            from journal_club.config import load_config
+
+            cfg = load_config("config.yaml")
+            pdf_path = download_ajog_toc_pdf(cfg)
+
+            if pdf_path and Path(pdf_path).exists():
+                print(f"   [TOC] Using downloaded PDF: {pdf_path}")
+                result = scrape_via_toc_pdf(pdf_path)
+                if result.articles:
+                    return result
+                print(f"   [TOC] PDF parsing yielded no articles, falling back to PubMed")
+
+        except Exception as e:
+            print(f"   [TOC] Automatic PDF download failed: {e}")
+
+        # Fall back to PubMed
+        if issn:
+            return scrape_via_pubmed(issn, reldate=reldate)
+        return TocResult(issue_label="")
+
     try:
         r = requests.get(toc_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
         r.raise_for_status()
