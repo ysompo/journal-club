@@ -157,19 +157,60 @@ def download_ajog_toc_pdf(cfg: Config, metadata: Optional[dict] = None, timeout:
             print(f"[AJOG PDF] PDF URL: {pdf_url}")
             print("[AJOG PDF] Downloading PDF...")
 
-            # Try to download by navigating to the PDF URL
-            try:
-                with page.expect_download(timeout=30000) as download_info:
-                    page.goto(pdf_url, wait_until="commit", timeout=15000)
-                download = download_info.value
-            except Exception as e:
-                print(f"[AJOG PDF] Direct navigation failed, trying click method...")
-                # Fall back to clicking (may fail due to banner)
-                with page.expect_download(timeout=15000) as download_info:
-                    pdf_links[0].click(force=True, timeout=5000)
-                download = download_info.value
+            # Try multiple strategies to download the PDF
+            download = None
 
-            # Construct filename and save
+            # Strategy 1: Use click on the PDF link with download interception
+            try:
+                print("[AJOG PDF] Strategy 1: Clicking PDF link with download handler...")
+                with page.expect_download(timeout=30000) as download_info:
+                    pdf_links[0].click(force=True, timeout=10000)
+                download = download_info.value
+                print(f"[AJOG PDF] ✓ Download via click succeeded")
+            except Exception as e:
+                print(f"[AJOG PDF] ✗ Click method failed: {e}")
+
+            # Strategy 2: Use right-click context menu "Save link as"
+            if not download:
+                try:
+                    print("[AJOG PDF] Strategy 2: Right-click context menu...")
+                    with page.expect_download(timeout=30000) as download_info:
+                        pdf_links[0].click(button="right", force=True, timeout=5000)
+                        # Try clicking "Save as" or equivalent in context menu
+                        page.wait_for_timeout(500)
+                        # This approach is unreliable, skip if we get here
+                    download = download_info.value
+                    print(f"[AJOG PDF] ✓ Download via context menu succeeded")
+                except Exception as e:
+                    print(f"[AJOG PDF] ✗ Context menu method failed: {e}")
+
+            # Strategy 3: Fetch PDF directly using page.request with proper headers
+            if not download:
+                try:
+                    print("[AJOG PDF] Strategy 3: Direct fetch with request API...")
+                    # Use the browser's request context to maintain cookies/session
+                    response = page.request.get(pdf_url, timeout=30000)
+                    if response.status == 200:
+                        pdf_data = response.body()
+                        filename = construct_pdf_filename(metadata)
+                        pdf_path = pdf_dir / filename
+
+                        with open(pdf_path, "wb") as f:
+                            f.write(pdf_data)
+
+                        file_size = pdf_path.stat().st_size
+                        print(f"[AJOG PDF] ✓ Downloaded successfully via request API: {pdf_path.name} ({file_size:,} bytes)")
+                        return str(pdf_path)
+                    else:
+                        print(f"[AJOG PDF] ✗ Request returned status {response.status}: {response.text()[:200]}")
+                except Exception as e:
+                    print(f"[AJOG PDF] ✗ Direct fetch failed: {e}")
+
+            if not download:
+                print("[AJOG PDF] ✗ All download strategies failed")
+                return None
+
+            # Save downloaded file
             filename = construct_pdf_filename(metadata)
             pdf_path = pdf_dir / filename
 
