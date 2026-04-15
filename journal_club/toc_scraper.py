@@ -203,53 +203,65 @@ def _enrich_abstracts(articles: list[dict], issn: str) -> None:
 def scrape_ajog_html(html_content: str) -> TocResult:
     """
     Scrape AJOG article list directly from the HTML page.
-    This is a fallback when PDF download/parsing fails.
+    Extracts articles by looking for patterns in the HTML structure.
     """
     try:
         soup = BeautifulSoup(html_content, "html.parser")
         articles = []
 
-        # Look for article elements - AJOG typically uses article cards with specific classes
-        # Try multiple selectors for different page structures
-        article_elements = soup.select(
-            "article, [data-article-id], .article-card, .ArticleCard, "
-            "[class*='article'][class*='item'], .toc-article"
-        )
+        # Extract issue label from page (e.g., "April 2026 - Volume 234, Issue 4")
+        issue_label = "AJOG Current Issue"
+        volume_match = re.search(r'Volume\s+(\d+).*?Issue\s+(\d+)', html_content)
+        if volume_match:
+            issue_label = f"Vol {volume_match.group(1)} Issue {volume_match.group(2)}"
 
-        if not article_elements:
-            # Try finding article titles and authors in common structures
-            article_elements = soup.find_all(["h3", "h4"], limit=50)
+        # Look for article links/titles in common AJOG structures
+        # Try looking for links that point to articles
+        article_links = soup.find_all("a", href=re.compile(r"/article/|/content/|/issue/current"))
 
-        for elem in article_elements[:50]:  # Limit to 50 articles
-            # Extract title
-            title_elem = elem.find(["h2", "h3", "h4"]) or elem
-            title = (title_elem.get_text(strip=True) if title_elem else "").strip()
+        found_articles = set()  # Track by title to avoid duplicates
+        article_type_map = {
+            "expert": "Expert Review",
+            "review": "Systematic Review",
+            "opinion": "Clinical Opinion",
+            "surgeon": "Surgeon's Corner",
+            "research": "Original Research",
+            "letter": "Letter",
+        }
 
-            if not title or len(title) < 10:
+        for link in article_links[:100]:  # Limit to first 100 links
+            title = link.get_text(strip=True)
+
+            # Skip navigation links and empty titles
+            if not title or len(title) < 10 or title in ["Current", "Archives", "Submit"]:
                 continue
 
-            # Extract authors
-            author_elem = elem.find_next(["p", "div"], class_=lambda x: x and "author" in x.lower())
-            authors_text = author_elem.get_text(strip=True) if author_elem else ""
-            authors = [a.strip() for a in re.split(r"[,;]", authors_text) if a.strip()][:5]
+            if title in found_articles:
+                continue
 
-            # Try to extract article type from context
-            section_header = elem.find_previous(["h2", "header"], class_=lambda x: x and "section" in (x or "").lower())
-            article_type = "Journal Article"
-            if section_header:
-                section_text = section_header.get_text(strip=True).upper()
-                if "REVIEW" in section_text:
-                    article_type = "Review"
-                elif "RESEARCH" in section_text:
-                    article_type = "Original Research"
-                elif "OPINION" in section_text:
-                    article_type = "Clinical Opinion"
+            found_articles.add(title)
 
-            # Try to find DOI or URL
-            link_elem = elem.find("a", href=True)
-            url = link_elem["href"] if link_elem else ""
+            # Try to get href for URL
+            url = link.get("href", "")
             if url.startswith("/"):
                 url = "https://www.ajog.org" + url
+
+            # Guess article type from title or surrounding context
+            article_type = "Journal Article"
+            title_lower = title.lower()
+            for key, atype in article_type_map.items():
+                if key in title_lower:
+                    article_type = atype
+                    break
+
+            # Try to find authors near the title
+            authors = []
+            parent = link.find_parent(["article", "div", "li"])
+            if parent:
+                author_text = parent.get_text(strip=True)
+                # Look for author patterns (capitalized names)
+                author_matches = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+(?:Jr|Sr|MD|PhD|DVM))?(?:;|,|$)', author_text)
+                authors = [a.strip() for a in author_matches if a.strip()][:5]
 
             article = {
                 "url": url,
@@ -261,14 +273,31 @@ def scrape_ajog_html(html_content: str) -> TocResult:
             }
             articles.append(article)
 
-        # Extract issue label
-        issue_header = soup.find(["h1", "h2"], string=lambda x: x and ("Volume" in str(x) or "Issue" in str(x)))
-        issue_label = issue_header.get_text(strip=True) if issue_header else "AJOG Current Issue"
-
         if articles:
+            print(f"   [TOC] Found {len(articles)} articles from HTML")
             return TocResult(issue_label=issue_label, articles=articles)
 
-        return TocResult(issue_label="", articles=[])
+        # Alternative: Look for table-of-contents specific structures
+        toc_section = soup.find(["main", "article"], class_=lambda x: x and "toc" in (x or "").lower())
+        if toc_section:
+            # Extract text content and try to parse articles from text
+            text = toc_section.get_text()
+            # Look for numbered items or common article patterns
+            pattern = r'^(.{20,200}?)(?:\n|$)'
+            potential_titles = re.findall(pattern, text, re.MULTILINE)
+            if potential_titles:
+                for title in potential_titles[:50]:
+                    if len(title) > 15:
+                        articles.append({
+                            "url": "",
+                            "title": title.strip(),
+                            "authors": [],
+                            "article_type": "Journal Article",
+                            "doi": None,
+                            "abstract": "",
+                        })
+
+        return TocResult(issue_label=issue_label, articles=articles)
 
     except Exception as e:
         print(f"   [TOC] AJOG HTML scraping error: {e}")
