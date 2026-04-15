@@ -348,36 +348,50 @@ def scrape(
 
     # Handle automatic PDF downloading and scraping (for AJOG)
     if publisher == "toc_pdf_auto":
-        # Try 1: Download and parse PDF
+        # Try 1: Download (returns either PDF or HTML content marker)
         try:
             from journal_club.toc_pdf_downloader import download_ajog_toc_pdf
             from journal_club.config import load_config
 
             cfg = load_config("config.yaml")
-            pdf_path = download_ajog_toc_pdf(cfg)
+            result_path = download_ajog_toc_pdf(cfg)
 
-            if pdf_path and Path(pdf_path).exists():
-                print(f"   [TOC] Using downloaded PDF: {pdf_path}")
-                result = scrape_via_toc_pdf(pdf_path)
+            # Check if it's a PDF
+            if result_path and Path(result_path).exists() and result_path.endswith('.pdf'):
+                print(f"   [TOC] Parsing downloaded PDF: {result_path}")
+                result = scrape_via_toc_pdf(result_path)
                 if result.articles:
                     return result
                 print(f"   [TOC] PDF parsing yielded no articles, trying HTML scrape")
 
-        except Exception as e:
-            print(f"   [TOC] Automatic PDF download failed: {e}")
+            # Check if it's an HTML content marker (format: "html:/path/to/file")
+            if result_path and result_path.startswith("html:"):
+                html_file = result_path[5:]  # Remove "html:" prefix
+                if Path(html_file).exists():
+                    print(f"   [TOC] Parsing HTML content from {Path(html_file).name}")
+                    with open(html_file, "r", encoding="utf-8") as f:
+                        html_content = f.read()
+                    result = scrape_ajog_html(html_content)
+                    if result.articles:
+                        print(f"   [TOC] Found {len(result.articles)} articles from browser-loaded HTML")
+                        return result
+                    print(f"   [TOC] HTML parsing yielded no articles, falling back to PubMed")
 
-        # Try 2: Scrape the AJOG HTML page directly
+        except Exception as e:
+            print(f"   [TOC] Automatic download/parse failed: {e}")
+
+        # Try 2: Direct HTML scrape (may be blocked by Cloudflare, but worth trying)
         try:
-            print(f"   [TOC] Attempting HTML scrape of {toc_url}")
+            print(f"   [TOC] Attempting direct HTML scrape of {toc_url}")
             r = requests.get(toc_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
             r.raise_for_status()
             result = scrape_ajog_html(r.text)
             if result.articles:
-                print(f"   [TOC] Found {len(result.articles)} articles via HTML scrape")
+                print(f"   [TOC] Found {len(result.articles)} articles via direct HTML scrape")
                 return result
-            print(f"   [TOC] HTML scrape yielded no articles, falling back to PubMed")
+            print(f"   [TOC] Direct HTML scrape yielded no articles")
         except Exception as e:
-            print(f"   [TOC] HTML scrape failed: {e}")
+            print(f"   [TOC] Direct HTML scrape failed (expected - Cloudflare blocks requests library): {type(e).__name__}")
 
         # Fall back to PubMed
         if issn:

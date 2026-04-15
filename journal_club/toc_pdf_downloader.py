@@ -99,8 +99,8 @@ def download_ajog_toc_pdf(cfg: Config, metadata: Optional[dict] = None, timeout:
     Returns the path to the downloaded PDF, or None if download failed.
     Falls back to returning None, which triggers PubMed fallback in scraper.
 
-    Note: Cloudflare may block direct PDF downloads. This is expected behavior
-    and the system will fall back to PubMed ISSN-based queries automatically.
+    Note: Cloudflare blocks direct PDF access even from browsers. The HTML page
+    content is extracted and returned to the scraper for HTML-based parsing as a fallback.
     """
     pdf_dir = get_toc_pdf_dir()
 
@@ -109,10 +109,10 @@ def download_ajog_toc_pdf(cfg: Config, metadata: Optional[dict] = None, timeout:
             print("[AJOG PDF] Navigating to ajog.org/current...")
             page.goto("https://www.ajog.org/current", wait_until="networkidle", timeout=20_000)
 
-            # Extract issue metadata if not provided
-            if not metadata:
-                html_content = page.content()
-                metadata = extract_issue_metadata(html_content)
+            # Extract and return the page content for HTML scraping
+            # (Cloudflare blocks direct PDF access, so we use browser-loaded HTML instead)
+            html_content = page.content()
+            metadata = extract_issue_metadata(html_content)
 
             # Check if we already have this issue
             if metadata.get("volume") and metadata.get("issue"):
@@ -121,26 +121,16 @@ def download_ajog_toc_pdf(cfg: Config, metadata: Optional[dict] = None, timeout:
                     print(f"[AJOG PDF] Already have PDF for this issue: {existing}")
                     return existing
 
-            # Find the PDF download link
-            print("[AJOG PDF] Looking for TOC PDF link...")
+            # Save the HTML content to a special marker file so scraper can use it
+            # This is a workaround for Cloudflare blocking direct PDF access
+            print("[AJOG PDF] Saving page content for HTML parsing (Cloudflare blocks PDF URLs)...")
+            html_file = pdf_dir / f"ajog_page_html_{metadata.get('volume', 'unknown')}_{metadata.get('issue', 'unknown')}.txt"
+            with open(html_file, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            print(f"[AJOG PDF] Saved page HTML to {html_file.name}")
 
-            # Try to handle cookie banner by hiding it with JavaScript
-            try:
-                page.evaluate("""
-                    document.querySelectorAll('[id*="onetrust"], [class*="onetrust"]').forEach(el => {
-                        if (el.style) el.style.display = 'none';
-                    });
-                """)
-                import time
-                time.sleep(1)
-            except:
-                pass
-
-            # Get the PDF link and extract its href
-            pdf_links = page.locator("a.pdfLink, a[href*='.pdf'], a[data-test-id*='pdf']").all()
-            if not pdf_links:
-                print("[AJOG PDF] No PDF link found on page")
-                return None
+            # Return special marker to indicate HTML content is available
+            return f"html:{html_file}"
 
             # Try to get the PDF URL from the href attribute
             pdf_href = pdf_links[0].get_attribute("href")
