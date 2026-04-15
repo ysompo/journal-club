@@ -203,7 +203,8 @@ def _enrich_abstracts(articles: list[dict], issn: str) -> None:
 def scrape_ajog_html(html_content: str) -> TocResult:
     """
     Scrape AJOG article list directly from the HTML page.
-    Extracts articles by looking for patterns in the HTML structure.
+    Extracts articles by looking for patterns in the HTML structure,
+    filtering to only include articles from the current issue.
     """
     try:
         soup = BeautifulSoup(html_content, "html.parser")
@@ -212,12 +213,25 @@ def scrape_ajog_html(html_content: str) -> TocResult:
         # Extract issue label from page (e.g., "April 2026 - Volume 234, Issue 4")
         issue_label = "AJOG Current Issue"
         volume_match = re.search(r'Volume\s+(\d+).*?Issue\s+(\d+)', html_content)
+        current_volume = None
+        current_issue = None
         if volume_match:
-            issue_label = f"Vol {volume_match.group(1)} Issue {volume_match.group(2)}"
+            current_volume = volume_match.group(1)
+            current_issue = volume_match.group(2)
+            issue_label = f"Vol {current_volume} Issue {current_issue}"
 
-        # Look for article links/titles in common AJOG structures
-        # Try looking for links that point to articles
-        article_links = soup.find_all("a", href=re.compile(r"/article/|/content/|/issue/current"))
+        # Strategy 1: Find the main issue content area (skip sidebar/featured sections)
+        # Look for the main content area that contains the actual TOC
+        main_content = soup.find(["main", "div"], class_=lambda x: x and any(
+            term in (x or "").lower() for term in ["content", "toc", "issue", "table"]
+        ))
+
+        if main_content:
+            # Limit to main content area only
+            search_area = main_content
+        else:
+            # Fall back to whole page but be more selective
+            search_area = soup
 
         found_articles = set()  # Track by title to avoid duplicates
         article_type_map = {
@@ -227,17 +241,39 @@ def scrape_ajog_html(html_content: str) -> TocResult:
             "surgeon": "Surgeon's Corner",
             "research": "Original Research",
             "letter": "Letter",
+            "commentary": "Commentary",
         }
 
-        for link in article_links[:100]:  # Limit to first 100 links
-            title = link.get_text(strip=True)
+        # Look for article links, limiting to the main content area
+        article_links = search_area.find_all("a", href=re.compile(r"/article/S\d+"))
+
+        # Filter out articles that are explicitly marked as in-press or from other issues
+        in_press_keywords = ["in press", "accepted", "ahead of print", "epub"]
+
+        for link in article_links:
+            title = link.get_text(strip=True).strip()
 
             # Skip navigation links and empty titles
-            if not title or len(title) < 10 or title in ["Current", "Archives", "Submit"]:
+            if not title or len(title) < 10 or title in ["Current", "Archives", "Submit", "Home"]:
                 continue
 
             if title in found_articles:
                 continue
+
+            # Check if this article is marked as in-press (skip it)
+            parent_section = link.find_parent(["div", "article", "li", "tr"], recursive=True)
+            if parent_section:
+                section_text = parent_section.get_text(strip=True).lower()
+                if any(keyword in section_text for keyword in in_press_keywords):
+                    continue
+
+            # Check if article might be from a different issue (very basic check)
+            # If we found volume/issue, look for indicators this might be from another issue
+            if current_volume and current_issue:
+                # Skip if the parent section mentions a different volume or issue
+                parent_text_lower = section_text.lower() if 'section_text' in locals() else ""
+                if re.search(rf'volume\s+(?!{current_volume})\d+', parent_text_lower):
+                    continue
 
             found_articles.add(title)
 
@@ -256,12 +292,12 @@ def scrape_ajog_html(html_content: str) -> TocResult:
 
             # Try to find authors near the title
             authors = []
-            parent = link.find_parent(["article", "div", "li"])
+            parent = link.find_parent(["article", "div", "li", "tr"])
             if parent:
                 author_text = parent.get_text(strip=True)
                 # Look for author patterns (capitalized names)
                 author_matches = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+(?:Jr|Sr|MD|PhD|DVM))?(?:;|,|$)', author_text)
-                authors = [a.strip() for a in author_matches if a.strip()][:5]
+                authors = [a.strip() for a in author_matches if a.strip() and len(a.strip()) > 2][:5]
 
             article = {
                 "url": url,
@@ -274,30 +310,11 @@ def scrape_ajog_html(html_content: str) -> TocResult:
             articles.append(article)
 
         if articles:
-            print(f"   [TOC] Found {len(articles)} articles from HTML")
+            print(f"   [TOC] Found {len(articles)} articles from HTML (filtered for current issue)")
             return TocResult(issue_label=issue_label, articles=articles)
 
-        # Alternative: Look for table-of-contents specific structures
-        toc_section = soup.find(["main", "article"], class_=lambda x: x and "toc" in (x or "").lower())
-        if toc_section:
-            # Extract text content and try to parse articles from text
-            text = toc_section.get_text()
-            # Look for numbered items or common article patterns
-            pattern = r'^(.{20,200}?)(?:\n|$)'
-            potential_titles = re.findall(pattern, text, re.MULTILINE)
-            if potential_titles:
-                for title in potential_titles[:50]:
-                    if len(title) > 15:
-                        articles.append({
-                            "url": "",
-                            "title": title.strip(),
-                            "authors": [],
-                            "article_type": "Journal Article",
-                            "doi": None,
-                            "abstract": "",
-                        })
-
-        return TocResult(issue_label=issue_label, articles=articles)
+        # Fallback if no articles found with link-based extraction
+        return TocResult(issue_label=issue_label, articles=[])
 
     except Exception as e:
         print(f"   [TOC] AJOG HTML scraping error: {e}")
