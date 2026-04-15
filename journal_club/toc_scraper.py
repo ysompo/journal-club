@@ -200,6 +200,81 @@ def _enrich_abstracts(articles: list[dict], issn: str) -> None:
         print(f"   [TOC] Abstract enrichment error: {e}")
 
 
+def scrape_ajog_html(html_content: str) -> TocResult:
+    """
+    Scrape AJOG article list directly from the HTML page.
+    This is a fallback when PDF download/parsing fails.
+    """
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        articles = []
+
+        # Look for article elements - AJOG typically uses article cards with specific classes
+        # Try multiple selectors for different page structures
+        article_elements = soup.select(
+            "article, [data-article-id], .article-card, .ArticleCard, "
+            "[class*='article'][class*='item'], .toc-article"
+        )
+
+        if not article_elements:
+            # Try finding article titles and authors in common structures
+            article_elements = soup.find_all(["h3", "h4"], limit=50)
+
+        for elem in article_elements[:50]:  # Limit to 50 articles
+            # Extract title
+            title_elem = elem.find(["h2", "h3", "h4"]) or elem
+            title = (title_elem.get_text(strip=True) if title_elem else "").strip()
+
+            if not title or len(title) < 10:
+                continue
+
+            # Extract authors
+            author_elem = elem.find_next(["p", "div"], class_=lambda x: x and "author" in x.lower())
+            authors_text = author_elem.get_text(strip=True) if author_elem else ""
+            authors = [a.strip() for a in re.split(r"[,;]", authors_text) if a.strip()][:5]
+
+            # Try to extract article type from context
+            section_header = elem.find_previous(["h2", "header"], class_=lambda x: x and "section" in (x or "").lower())
+            article_type = "Journal Article"
+            if section_header:
+                section_text = section_header.get_text(strip=True).upper()
+                if "REVIEW" in section_text:
+                    article_type = "Review"
+                elif "RESEARCH" in section_text:
+                    article_type = "Original Research"
+                elif "OPINION" in section_text:
+                    article_type = "Clinical Opinion"
+
+            # Try to find DOI or URL
+            link_elem = elem.find("a", href=True)
+            url = link_elem["href"] if link_elem else ""
+            if url.startswith("/"):
+                url = "https://www.ajog.org" + url
+
+            article = {
+                "url": url,
+                "title": title,
+                "authors": authors,
+                "article_type": article_type,
+                "doi": None,
+                "abstract": "",
+            }
+            articles.append(article)
+
+        # Extract issue label
+        issue_header = soup.find(["h1", "h2"], string=lambda x: x and ("Volume" in str(x) or "Issue" in str(x)))
+        issue_label = issue_header.get_text(strip=True) if issue_header else "AJOG Current Issue"
+
+        if articles:
+            return TocResult(issue_label=issue_label, articles=articles)
+
+        return TocResult(issue_label="", articles=[])
+
+    except Exception as e:
+        print(f"   [TOC] AJOG HTML scraping error: {e}")
+        return TocResult(issue_label="", articles=[])
+
+
 def scrape_via_toc_pdf(pdf_path: str) -> TocResult:
     """
     Parse AJOG TOC PDF and extract article information.
@@ -273,6 +348,7 @@ def scrape(
 
     # Handle automatic PDF downloading and scraping (for AJOG)
     if publisher == "toc_pdf_auto":
+        # Try 1: Download and parse PDF
         try:
             from journal_club.toc_pdf_downloader import download_ajog_toc_pdf
             from journal_club.config import load_config
@@ -285,13 +361,27 @@ def scrape(
                 result = scrape_via_toc_pdf(pdf_path)
                 if result.articles:
                     return result
-                print(f"   [TOC] PDF parsing yielded no articles, falling back to PubMed")
+                print(f"   [TOC] PDF parsing yielded no articles, trying HTML scrape")
 
         except Exception as e:
             print(f"   [TOC] Automatic PDF download failed: {e}")
 
+        # Try 2: Scrape the AJOG HTML page directly
+        try:
+            print(f"   [TOC] Attempting HTML scrape of {toc_url}")
+            r = requests.get(toc_url, headers=_HEADERS, timeout=_TIMEOUT, allow_redirects=True)
+            r.raise_for_status()
+            result = scrape_ajog_html(r.text)
+            if result.articles:
+                print(f"   [TOC] Found {len(result.articles)} articles via HTML scrape")
+                return result
+            print(f"   [TOC] HTML scrape yielded no articles, falling back to PubMed")
+        except Exception as e:
+            print(f"   [TOC] HTML scrape failed: {e}")
+
         # Fall back to PubMed
         if issn:
+            print(f"   [TOC] Using PubMed fallback for ISSN {issn}")
             return scrape_via_pubmed(issn, reldate=reldate)
         return TocResult(issue_label="")
 
