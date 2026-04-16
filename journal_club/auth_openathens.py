@@ -72,8 +72,18 @@ def _click_access_through_institution(page: Page) -> None:
 def _select_huji_on_wayfinder(page: Page) -> None:
     """Type HUJI into the institution search box and click the result."""
     import sys
+    import datetime as _dt
     print(f"   [OA] _select_huji_on_wayfinder starting (URL: {page.url[:60]})")
     sys.stdout.flush()
+
+    # Screenshot on entry so we can see what the wayfinder page looks like
+    try:
+        _ts = _dt.datetime.now().strftime("%H%M%S")
+        page.screenshot(path=f"debug_oa_wayfinder_{_ts}.png")
+        print(f"   [OA] Wayfinder screenshot: debug_oa_wayfinder_{_ts}.png")
+    except Exception:
+        pass
+
     dismiss_cookies(page)
     time.sleep(1)
 
@@ -95,6 +105,14 @@ def _select_huji_on_wayfinder(page: Page) -> None:
                 break
             except Exception:
                 continue
+
+        # Screenshot after typing to see dropdown state
+        try:
+            _ts2 = _dt.datetime.now().strftime("%H%M%S")
+            page.screenshot(path=f"debug_oa_dropdown_{_ts2}.png")
+            print(f"   [OA] Dropdown screenshot: debug_oa_dropdown_{_ts2}.png")
+        except Exception:
+            pass
 
         # Click the HUJI result
         for sel in _INSTITUTION_RESULT_SELS:

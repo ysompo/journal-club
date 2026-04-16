@@ -82,7 +82,8 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
                 logger.debug(f"[PDF download.path() error] {e}")
 
             # Fallback: save_as to temp dir.
-            tmp = os.path.join(os.environ.get("TEMP", "C:\\Temp"), dl.suggested_filename or "download.pdf")
+            import tempfile as _tempfile
+            tmp = os.path.join(_tempfile.gettempdir(), dl.suggested_filename or "download.pdf")
             try:
                 dl.save_as(tmp)
             except Exception as e:

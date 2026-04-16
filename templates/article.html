@@ -5,7 +5,7 @@
 <div class="px-8 py-8 max-w-3xl">
 
   <!-- Back -->
-  <a href="./history" class="inline-flex items-center gap-1 text-sm text-on-surface-variant hover:text-primary mb-6 font-semibold transition-colors">
+  <a href="{{ url_for('history') }}" class="inline-flex items-center gap-1 text-sm text-on-surface-variant hover:text-primary mb-6 font-semibold transition-colors">
     <span class="material-symbols-outlined text-base">arrow_back</span> Back to History
   </a>
 
@@ -20,11 +20,11 @@
     </button>
 
     {% if article.pdf_path %}
-    <a href="./pdf/{{ article.id }}" target="_blank"
+    <a href="{{ url_for('serve_pdf', article_id=article.id) }}" target="_blank"
        class="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded font-body font-semibold text-sm hover:bg-primary-container transition-colors">
       <span class="material-symbols-outlined text-base">picture_as_pdf</span> View PDF
     </a>
-    <a href="./pdf/{{ article.id }}?download=1"
+    <a href="{{ url_for('serve_pdf', article_id=article.id) }}?download=1"
        class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded font-body font-semibold text-sm hover:bg-blue-700 transition-colors">
       <span class="material-symbols-outlined text-base">download</span> Download PDF
     </a>
