@@ -181,7 +181,7 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
             logger.info("[Browser] Launching Playwright's bundled Chromium")
             context: BrowserContext = p.chromium.launch_persistent_context(
                 user_data_dir=temp_profile,
-                headless=False,  # visible window helps with debugging
+                headless=True,  # required on server (Render, Docker, etc.)
                 args=[
                     "--no-first-run",
                     "--no-default-browser-check",
