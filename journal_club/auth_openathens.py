@@ -311,12 +311,30 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
 
     sso_url = _build_sso_url(article_url)
     if sso_url:
+        # For Wiley/Atypon: warm up Cloudflare session like we do for ScienceDirect
+        if "onlinelibrary.wiley.com" in sso_url:
+            print("[OA Wiley] Warming up Cloudflare session via homepage...")
+            try:
+                page.goto("https://www.onlinelibrary.wiley.com",
+                          wait_until="domcontentloaded", timeout=20_000)
+                time.sleep(3)
+                print(f"   Homepage loaded: {page.title()[:60]}")
+            except Exception as _e:
+                print(f"   Homepage warm-up error (continuing): {_e}")
+
         # Navigate directly to the publisher's ssostart page
+        # Try "commit" first (page started responding), then fallback to "domcontentloaded"
         print(f"   [OA] SSO URL: {sso_url[:100]}")
         try:
-            page.goto(sso_url, wait_until="domcontentloaded", timeout=30_000)
+            page.goto(sso_url, wait_until="commit", timeout=20_000)
+            print("   [OA] Page committed (response started)")
         except Exception as e:
-            print(f"   [OA] SSO navigation error (continuing): {e}")
+            print(f"   [OA] SSO commit error: {e} — trying domcontentloaded...")
+            try:
+                page.goto(sso_url, wait_until="domcontentloaded", timeout=30_000)
+                print("   [OA] Page domcontentloaded")
+            except Exception as e2:
+                print(f"   [OA] SSO navigation error (continuing): {e2}")
         time.sleep(3)
         dismiss_cookies(page)
 
