@@ -17,6 +17,7 @@ def send_reading_list(
     api_key: str,
     from_addr: str,
     to_addrs: list[str],
+    failed: list[dict] | None = None,
 ) -> int:
     """
     Send the reading list email via Resend.
@@ -53,6 +54,28 @@ def send_reading_list(
           </td>
         </tr>""")
 
+    if failed:
+        failed_rows = "".join(
+            f"<tr><td style='padding:8px;color:#64748b;font-size:13px;'>{i+1}</td>"
+            f"<td style='padding:8px;'>"
+            f"<div style='font-weight:600;color:#1e293b;'>{f.get('title','')}</div>"
+            f"<div style='color:#b45309;font-size:12px;margin-top:2px;'>PDF could not be downloaded</div>"
+            f"</td></tr>"
+            for i, f in enumerate(failed)
+        )
+        failed_section = f"""
+        <div style="margin-top:20px;padding:16px 20px;background:#fff7ed;
+                    border-radius:6px;border:1px solid #fed7aa;">
+          <div style="font-weight:700;color:#9a3412;margin-bottom:10px;font-size:13px;">
+            &#9888; {len(failed)} article{'s' if len(failed)!=1 else ''} could not be downloaded
+          </div>
+          <table style="width:100%;border-collapse:collapse;">
+            {failed_rows}
+          </table>
+        </div>"""
+    else:
+        failed_section = ""
+
     html = f"""
     <div style="font-family:Inter,sans-serif;max-width:640px;margin:0 auto;color:#1e293b;">
       <div style="background:#005977;padding:24px 32px;border-radius:8px 8px 0 0;">
@@ -63,6 +86,7 @@ def send_reading_list(
         <table style="width:100%;border-collapse:collapse;">
           {''.join(rows)}
         </table>
+        {failed_section}
         <p style="margin-top:20px;font-size:11px;color:#94a3b8;">
           Sent from Journal Club · HUJI PDF Library
         </p>
@@ -95,3 +119,64 @@ def send_reading_list(
 
     resend.Emails.send(params)
     return attached
+
+
+def send_error_report(report: dict, api_key: str, to_addr: str = "ysompo@gmail.com") -> bool:
+    """Send detailed error report for a failed download."""
+    import resend
+
+    resend.api_key = api_key
+
+    # Build HTML email
+    html = f"""
+    <html>
+    <body style="font-family: system-ui, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc2626;">⚠️ Download Error Report</h2>
+
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 16px 0;">
+                <h3 style="margin-top: 0;">Article</h3>
+                <p><strong>Title:</strong> {report.get('title', 'Unknown')}</p>
+                <p><strong>DOI:</strong> <code>{report.get('doi', 'Unknown')}</code></p>
+                <p><strong>URL:</strong> <a href="{report.get('url', '#')}">{report.get('url', 'Unknown')[:60]}…</a></p>
+            </div>
+
+            <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 16px; margin: 16px 0;">
+                <h3 style="margin-top: 0;">Error</h3>
+                <p><code style="background: #f3f4f6; padding: 8px; border-radius: 4px; display: block; overflow-x: auto;">
+                    {report.get('error', 'Unknown error')}
+                </code></p>
+                <p style="font-size: 12px; color: #666;">
+                    <strong>Time:</strong> {report.get('timestamp', 'Unknown')}
+                </p>
+            </div>
+
+            <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; margin: 16px 0;">
+                <h3 style="margin-top: 0;">Recent Logs</h3>
+                <pre style="background: #111827; color: #d1d5db; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px; margin: 0;">
+{report.get('logs', 'No logs available')}
+                </pre>
+            </div>
+
+            <p style="font-size: 12px; color: #666; border-top: 1px solid #e5e7eb; padding-top: 12px;">
+                This is an automated error report from Journal Club.
+                Article ID: {report.get('article_id', 'Unknown')}
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    try:
+        resend.Emails.send(
+            {
+                "from": "Journal Club <noreply@journal-club.local>",
+                "to": to_addr,
+                "subject": f"[Journal Club] Download Error: {report.get('title', 'Unknown')[:50]}",
+                "html": html,
+            }
+        )
+        return True
+    except Exception as e:
+        print(f"[ErrorReport] Email send failed: {e}")
+        return False

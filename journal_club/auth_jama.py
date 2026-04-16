@@ -59,7 +59,7 @@ def _handle_openathens_intermediate(page: Page):
             continue
 
 def authenticate_jama(page: Page, article_url: str, email: str, password: str,
-                      captured: list):
+                      captured: list, output_dir: str = None):
     """Full JAMA auth flow. Assumes PDF hooks already attached to page/context."""
     shib_url = _build_shibboleth_url(article_url)
     print(f"\n[JAMA Auth] Navigating to Shibboleth URL...")

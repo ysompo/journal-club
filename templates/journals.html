@@ -90,6 +90,19 @@
       </div>
     </div>
 
+    <!-- Persistent download status banner (shown when a download is in progress, even after navigation) -->
+    <div id="dl-banner" class="hidden px-6 py-2.5 border-b border-primary/20 bg-primary/5 flex items-center gap-3">
+      <span class="material-symbols-outlined text-primary text-base animate-spin">progress_activity</span>
+      <span class="text-sm text-primary font-medium flex-1 truncate" id="dl-banner-title">Downloading…</span>
+      <span class="text-xs text-slate-400" id="dl-banner-status">in progress</span>
+    </div>
+
+    <!-- Article type filter bar -->
+    <div id="type-filter-bar" class="hidden px-6 py-2.5 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+      <span class="text-xs text-slate-400 font-medium mr-1">Filter:</span>
+      <!-- buttons injected by JS -->
+    </div>
+
     <!-- Fetching progress bar (shown only while initial TOC load is in progress) -->
     <div id="fetch-banner" class="hidden px-6 py-4">
       <div class="rounded-lg border border-primary/20 bg-primary/5 px-5 py-4">
@@ -111,7 +124,7 @@
       {% for a in toc_articles %}
       {% set in_rl = a.id in reading_list_ids %}
       {% set sent_at = reading_list_sent_dates.get(a.id) %}
-      <div class="toc-article border border-slate-200 rounded-lg bg-white" data-id="{{ a.id }}">
+      <div class="toc-article border border-slate-200 rounded-lg bg-white" data-id="{{ a.id }}" data-article-type="{{ a.article_type or '' }}">
         <!-- Collapsed row -->
         <div class="px-4 py-3 flex items-start gap-3 cursor-pointer hover:bg-slate-50 transition-colors"
              onclick="toggleArticle(this)">
@@ -285,6 +298,144 @@
 <script>
 const SELECTED_ID = {{ selected_id or 'null' }};
 
+// ── Restore scroll position after page reload ──────────────────────────────────
+window.addEventListener('load', function() {
+  const pos = sessionStorage.getItem('scrollPos');
+  if (pos !== null) {
+    window.scrollTo(0, parseInt(pos));
+    sessionStorage.removeItem('scrollPos');
+  }
+});
+
+// ── Persistent download banner + queue restore ────────────────────────────────
+(function checkActiveDownload() {
+  fetch('./download/active')
+    .then(r => r.json())
+    .then(data => {
+      // Restore queued button states (articles waiting in the server-side queue)
+      if (data.queued && data.queued.length > 0) {
+        data.queued.forEach((item, i) => {
+          const qBtn = item.toc_article_id
+            ? document.querySelector(`.toc-article[data-id="${item.toc_article_id}"] .pdf-btn`)
+            : null;
+          if (qBtn) {
+            qBtn.disabled = true;
+            // position is 1-based: queue[0] = #1, queue[1] = #2, etc.
+            qBtn.innerHTML = `<span class="material-symbols-outlined text-sm">schedule</span> Queued (#${i + 1})`;
+            pollDownload(item.article_id, qBtn);
+          }
+        });
+      }
+
+      if (!data.active) return;
+
+      const banner = document.getElementById('dl-banner');
+      const bannerTitle = document.getElementById('dl-banner-title');
+      const bannerStatus = document.getElementById('dl-banner-status');
+
+      const queueSuffix = data.queued && data.queued.length > 0
+        ? ` (+${data.queued.length} queued)` : '';
+      bannerTitle.textContent = data.title || 'Downloading…';
+      bannerStatus.textContent = 'in progress' + queueSuffix;
+      banner.classList.remove('hidden');
+
+      // Restore the active article's button to "Downloading..." state
+      const articleBtn = data.toc_article_id
+        ? document.querySelector(`.toc-article[data-id="${data.toc_article_id}"] .pdf-btn`)
+        : null;
+      if (articleBtn) {
+        articleBtn.disabled = true;
+        articleBtn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
+      }
+
+      // Poll until done or failed
+      let polls = 0;
+      const poll = setInterval(() => {
+        if (++polls > 200) { clearInterval(poll); banner.classList.add('hidden'); return; }
+        fetch('./download/status/' + data.article_id)
+          .then(r => r.json())
+          .then(s => {
+            if (s.status === 'done') {
+              clearInterval(poll);
+              bannerStatus.textContent = '✓ done';
+              bannerTitle.textContent = data.title || 'Download complete';
+              document.getElementById('dl-banner').querySelector('.material-symbols-outlined').classList.remove('animate-spin');
+              document.getElementById('dl-banner').querySelector('.material-symbols-outlined').textContent = 'check_circle';
+              setTimeout(() => banner.classList.add('hidden'), 3000);
+              setTimeout(() => window.location.reload(), 3200);
+            } else if (s.status === 'failed') {
+              clearInterval(poll);
+              bannerStatus.textContent = '✗ failed';
+              bannerTitle.textContent = s.error || 'Download failed';
+              document.getElementById('dl-banner').querySelector('.material-symbols-outlined').classList.remove('animate-spin');
+              document.getElementById('dl-banner').querySelector('.material-symbols-outlined').textContent = 'error';
+              document.getElementById('dl-banner').classList.replace('bg-primary/5', 'bg-red-50');
+              document.getElementById('dl-banner').classList.replace('border-primary/20', 'border-red-200');
+              setTimeout(() => banner.classList.add('hidden'), 6000);
+            } else {
+              bannerStatus.textContent = 'in progress';
+            }
+          })
+          .catch(() => {});
+      }, 3000);
+    })
+    .catch(() => {});
+})();
+
+// ── Article type filters ──────────────────────────────────────────────────────
+(function initTypeFilters() {
+  const bar = document.getElementById('type-filter-bar');
+  if (!bar) return;
+
+  // Collect unique non-empty article types
+  const articles = Array.from(document.querySelectorAll('.toc-article'));
+  const types = [...new Set(
+    articles.map(a => a.dataset.articleType).filter(t => t)
+  )];
+  if (types.length < 2) return;  // Not worth showing a filter bar for <2 types
+
+  // Track which types are active (all active by default)
+  let active = new Set(types);
+
+  function applyFilter() {
+    articles.forEach(a => {
+      const t = a.dataset.articleType || '';
+      a.classList.toggle('hidden', t !== '' && !active.has(t));
+    });
+  }
+
+  function renderButtons() {
+    // Keep the label, remove old buttons
+    bar.querySelectorAll('button').forEach(b => b.remove());
+    types.forEach(type => {
+      const on = active.has(type);
+      const btn = document.createElement('button');
+      btn.textContent = type;
+      btn.className = [
+        'px-2.5 py-1 rounded-full text-xs font-medium border transition-colors',
+        on
+          ? 'bg-primary/10 text-primary border-primary/30'
+          : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+      ].join(' ');
+      btn.onclick = () => {
+        if (active.has(type)) {
+          // Don't allow deselecting the last active type
+          if (active.size === 1) { active = new Set(types); }
+          else { active.delete(type); }
+        } else {
+          active.add(type);
+        }
+        renderButtons();
+        applyFilter();
+      };
+      bar.appendChild(btn);
+    });
+  }
+
+  renderButtons();
+  bar.classList.remove('hidden');
+})();
+
 // ── Expand/collapse article row ───────────────────────────────────────────────
 function toggleArticle(header) {
   const detail = header.nextElementSibling;
@@ -345,55 +496,74 @@ function downloadPdf(url, tocArticleId, btn) {
   })
   .then(r => r.json().then(data => ({data, status: r.status})))
   .then(({data, status}) => {
-    if (status === 409) {
-      btn.disabled = false;
-      btn.innerHTML = '<span class="material-symbols-outlined text-sm">schedule</span> Busy — retry';
-      return;
-    }
     if (data.error) {
       btn.disabled = false;
-      btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
+      btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> ' +
+        (status === 429 ? 'Queue full' : 'Failed');
+      setTimeout(() => {
+        btn.innerHTML = '<span class="material-symbols-outlined text-sm">download</span> PDF';
+        btn.disabled = false;
+      }, 4000);
       return;
     }
-    btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
+    if (data.queued) {
+      btn.innerHTML = `<span class="material-symbols-outlined text-sm">schedule</span> Queued (#${data.position})`;
+    } else {
+      btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
+    }
     pollDownload(data.article_id, btn);
   });
 }
 
 function pollDownload(articleId, btn) {
+  let polls = 0;
+  let wasQueued = btn.innerHTML.includes('schedule');  // true when started as queued
+  const MAX_POLLS = 300;  // 300 × 3s = 15 min timeout (covers long queues)
   const poll = setInterval(() => {
+    polls++;
+    if (polls > MAX_POLLS) {
+      clearInterval(poll);
+      // Reload to show current DB state rather than a dead "Timed out" button.
+      // The download may have completed while the poll was running.
+      window.location.reload();
+      return;
+    }
     fetch('./download/status/' + articleId)
       .then(r => r.json())
       .then(data => {
+        // If button was queued, check whether this article is now the active download
+        if (wasQueued && data.status === 'downloading') {
+          fetch('./download/active').then(r => r.json()).then(a => {
+            if (a.active && a.article_id === articleId) {
+              wasQueued = false;
+              btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
+            }
+          }).catch(() => {});
+        }
         if (data.status === 'done') {
           clearInterval(poll);
-          // Replace button with View PDF + Download PDF buttons
-          const container = document.createElement('div');
-          container.className = 'flex items-center gap-1';
-          container.onclick = function(e) { e.stopPropagation(); };
-
-          // View PDF button
-          const viewLink = document.createElement('a');
-          viewLink.href = './pdf/' + articleId;
-          viewLink.target = '_blank';
-          viewLink.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors';
-          viewLink.innerHTML = '<span class="material-symbols-outlined text-sm">picture_as_pdf</span> View';
-
-          // Download PDF button
-          const downloadLink = document.createElement('a');
-          downloadLink.href = './pdf/' + articleId + '?download=1';
-          downloadLink.className = 'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors';
-          downloadLink.innerHTML = '<span class="material-symbols-outlined text-sm">download</span> Download';
-
-          container.appendChild(viewLink);
-          container.appendChild(downloadLink);
-          btn.replaceWith(container);
+          // Show a brief success state then reload so the Jinja template renders
+          // the correct "View PDF" link from the updated DB state.
+          btn.innerHTML = '<span class="material-symbols-outlined text-sm">check_circle</span> Done!';
+          btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white transition-colors';
+          setTimeout(() => {
+            sessionStorage.setItem('scrollPos', window.scrollY);
+            window.location.reload();
+          }, 1200);
         } else if (data.status === 'failed') {
           clearInterval(poll);
           btn.disabled = false;
           btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors';
           btn.title = data.error || 'Download failed';
           btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
+
+          // Add Report Issue button
+          const reportBtn = document.createElement('button');
+          reportBtn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-orange-600 text-white hover:bg-orange-700 transition-colors';
+          reportBtn.innerHTML = '<span class="material-symbols-outlined text-sm">mail</span> Report Issue';
+          reportBtn.onclick = () => reportDownloadError(articleId, btn, reportBtn);
+          btn.parentNode.insertBefore(reportBtn, btn.nextSibling);
+
           setTimeout(() => {
             btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-primary text-white hover:bg-primary-container transition-colors';
             btn.innerHTML = '<span class="material-symbols-outlined text-sm">refresh</span> Retry';
@@ -404,27 +574,87 @@ function pollDownload(articleId, btn) {
   }, 3000);
 }
 
+// ── Report download error ─────────────────────────────────────────────────────
+function reportDownloadError(articleId, failedBtn, reportBtn) {
+  failedBtn.disabled = true;
+  reportBtn.disabled = true;
+  reportBtn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Sending…';
+
+  fetch(`./download/report-error/${articleId}`, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        reportBtn.innerHTML = '<span class="material-symbols-outlined text-sm">check_circle</span> Sent!';
+        reportBtn.className = reportBtn.className.replace('bg-orange-600 hover:bg-orange-700', 'bg-green-600 hover:bg-green-700');
+        setTimeout(() => {
+          reportBtn.remove();
+          failedBtn.disabled = false;
+        }, 2000);
+      } else {
+        reportBtn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';
+        reportBtn.className = reportBtn.className.replace('bg-orange-600 hover:bg-orange-700', 'bg-red-600 hover:bg-red-700');
+        failedBtn.disabled = false;
+        reportBtn.disabled = false;
+      }
+    })
+    .catch(e => {
+      console.error('Error reporting issue:', e);
+      reportBtn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Error';
+      reportBtn.disabled = false;
+      failedBtn.disabled = false;
+    });
+}
+
 // ── Email reading list ────────────────────────────────────────────────────────
 function emailReadingList() {
   const btn = document.getElementById('email-btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="material-symbols-outlined text-base">hourglass_empty</span> Sending…';
+
+  function updateBtn(icon, text) {
+    btn.innerHTML = `<span class="material-symbols-outlined text-base">${icon}</span> ${text}`;
+  }
+
+  updateBtn('hourglass_empty', 'Starting…');
+
   fetch('./reading-list/email', {method: 'POST'})
     .then(r => r.json())
     .then(data => {
       if (data.error) {
-        btn.innerHTML = '<span class="material-symbols-outlined text-base">error</span> ' + data.error;
+        updateBtn('error', data.error);
         setTimeout(() => {
           btn.disabled = false;
-          btn.innerHTML = '<span class="material-symbols-outlined text-base">mail</span> Email reading list';
+          updateBtn('mail', 'Email reading list');
         }, 4000);
-      } else {
-        btn.innerHTML = '<span class="material-symbols-outlined text-base">check_circle</span> Sent!';
-        setTimeout(() => {
-          // Refresh page to show sent items with "Sent on DATE" status
-          window.location.reload();
-        }, 1500);
+        return;
       }
+      // Poll status every 2s
+      const poll = setInterval(() => {
+        fetch('./reading-list/email/status')
+          .then(r => r.json())
+          .then(s => {
+            if (s.status === 'downloading') {
+              const label = s.total > 0
+                ? `Downloading ${s.current}/${s.total}…`
+                : 'Preparing…';
+              updateBtn('download', label);
+            } else if (s.status === 'sending') {
+              updateBtn('send', 'Sending email…');
+            } else if (s.status === 'done') {
+              clearInterval(poll);
+              const failNote = s.failed_count > 0 ? ` (${s.failed_count} failed)` : '';
+              updateBtn('check_circle', `Sent! ${s.attached} PDF${s.attached !== 1 ? 's' : ''}${failNote}`);
+              setTimeout(() => window.location.reload(), 2000);
+            } else if (s.status === 'failed') {
+              clearInterval(poll);
+              updateBtn('error', s.error || 'Send failed');
+              setTimeout(() => {
+                btn.disabled = false;
+                updateBtn('mail', 'Email reading list');
+              }, 5000);
+            }
+          })
+          .catch(() => {});  // silently ignore poll errors
+      }, 2000);
     });
 }
 

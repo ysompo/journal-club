@@ -112,6 +112,186 @@ scheduler.start()
 
 # Only one browser-based download can run at a time (all downloads share port 9222)
 _download_lock = threading.Lock()
+# Dict so nested functions can mutate without 'global'; 'session' prevents a
+# zombie thread from releasing a *new* download's lock after a force-release.
+_download_lock_meta = {"acquired_at": None, "session": None, "article_id": None, "toc_article_id": None, "title": None}
+
+# Queue for pending downloads when the lock is busy
+_download_queue: list[dict] = []
+_queue_lock = threading.Lock()
+MAX_QUEUE = 15  # max items waiting (not counting the active download)
+
+# ── Email job state ───────────────────────────────────────────────────────────
+_email_job: dict = {
+    "running": False,
+    "status": "idle",       # idle | downloading | sending | done | failed
+    "current": 0,           # articles downloaded so far in this job
+    "total": 0,             # total articles to download in this job
+    "attached": 0,          # PDFs attached in email
+    "failed_count": 0,      # articles that failed to download
+    "error": None,          # fatal error (send failure)
+}
+_email_job_lock = threading.Lock()
+
+
+def _build_run(article_id, toc_article_id, meta, runtime_cfg, session_id):
+    """Return the download thread function for a single article."""
+    def _run():
+        try:
+            storage.set_download_error(article_id, "")
+            if not runtime_cfg.huji_email or not runtime_cfg.huji_password:
+                raise ValueError(
+                    "HUJI credentials not configured — go to Settings to enter your email and password."
+                )
+            from download import download_article
+            app.logger.info("[Download] Starting download for article_id=%s url=%s", article_id, meta.url)
+            _, pdf_path = download_article(meta.url, runtime_cfg)
+            storage.update_pdf_path(article_id, pdf_path)
+            app.logger.info("[Download] Success article_id=%s pdf=%s", article_id, pdf_path)
+            if toc_article_id:
+                storage.link_reading_list_to_article(toc_article_id, article_id)
+        except Exception as e:
+            app.logger.error("[Download thread] article_id=%s error: %s", article_id, e, exc_info=True)
+            # Safety net: the PDF may have been saved to disk before the exception
+            # (e.g. Node.js EPIPE crash after successful on_download capture).
+            # Chrome CDP downloads use the server-provided suggested filename, NOT
+            # the slugified URL.  Scan output_dir for any PDF created in the last
+            # 5 minutes that is a valid PDF file.
+            try:
+                import glob as _glob, time as _time
+                _out = runtime_cfg.output_dir
+                _now = _time.time()
+                _candidates = []
+                for _p in _glob.glob(os.path.join(_out, "*.pdf")):
+                    try:
+                        _age = _now - os.path.getmtime(_p)
+                        _size = os.path.getsize(_p)
+                        if _age < 300 and _size > 10_000:
+                            _candidates.append((_age, _p))
+                    except Exception:
+                        pass
+                # Pick the most recently modified PDF
+                if _candidates:
+                    _candidates.sort()
+                    _, _found = _candidates[0]
+                    with open(_found, "rb") as _f:
+                        _header = _f.read(4)
+                    if _header == b'%PDF':
+                        app.logger.warning(
+                            "[Download] Exception but valid PDF found on disk — treating as success: %s", _found
+                        )
+                        storage.update_pdf_path(article_id, _found)
+                        if toc_article_id:
+                            storage.link_reading_list_to_article(toc_article_id, article_id)
+                        return   # skip set_download_error
+                else:
+                    app.logger.warning(
+                        "[Download] No valid PDF found in recent files. Scanned: %s", _out
+                    )
+            except Exception as _check_err:
+                app.logger.error("[Download] Disk-check failed: %s", _check_err)
+            storage.set_download_error(article_id, str(e))
+        finally:
+            if _download_lock_meta["session"] == session_id:
+                _download_lock_meta["acquired_at"] = None
+                _download_lock_meta["session"] = None
+                _download_lock_meta["article_id"] = None
+                _download_lock_meta["toc_article_id"] = None
+                _download_lock_meta["title"] = None
+                _download_lock.release()
+            _start_next_queued()
+    return _run
+
+
+def _start_next_queued():
+    """Pop the next item from the queue and start its download. Call after releasing the lock."""
+    import time as _t, uuid as _u
+    with _queue_lock:
+        if not _download_queue:
+            return
+        if not _download_lock.acquire(blocking=False):
+            return  # another thread grabbed the lock first
+        item = _download_queue.pop(0)
+    sid = str(_u.uuid4())
+    _download_lock_meta["acquired_at"] = _t.time()
+    _download_lock_meta["session"] = sid
+    _download_lock_meta["article_id"] = item["article_id"]
+    _download_lock_meta["toc_article_id"] = item["toc_article_id"]
+    _download_lock_meta["title"] = item["title"]
+    threading.Thread(
+        target=_build_run(item["article_id"], item["toc_article_id"], item["meta"], item["runtime_cfg"], sid),
+        daemon=True,
+    ).start()
+    app.logger.info("[Download] Dequeued article_id=%s", item["article_id"])
+
+
+def _run_email_job(items: list[dict], rc) -> None:
+    """Download all undownloaded reading list articles, then send email. Runs in a daemon thread."""
+    import time as _t, uuid as _u
+    from journal_club.resolver import resolve as _resolve
+    from download import download_article as _download_article
+
+    to_addrs = [a for a in [rc.email_to_1, rc.email_to_2, rc.email_to_3] if a]
+    failed: list[dict] = []
+
+    undownloaded = [it for it in items if not it.get("pdf_path")]
+    _email_job.update({"status": "downloading", "current": 0, "total": len(undownloaded)})
+
+    for i, item in enumerate(undownloaded):
+        _email_job["current"] = i + 1
+        app.logger.info(
+            "[EmailJob] Downloading %d/%d: %s", i + 1, len(undownloaded), item.get("title", "")[:60]
+        )
+
+        _download_lock.acquire(blocking=True)
+        sid = str(_u.uuid4())
+        _download_lock_meta.update({
+            "acquired_at": _t.time(), "session": sid,
+            "article_id": None, "toc_article_id": item.get("toc_article_id"),
+            "title": item.get("title", ""),
+        })
+        try:
+            meta = _resolve(item.get("doi") or item.get("url"))
+            article_id = storage.save_article(meta, pdf_path=None)
+            storage.set_download_error(article_id, "")
+            _download_lock_meta["article_id"] = article_id
+            _, pdf_path = _download_article(meta.url, rc)
+            storage.update_pdf_path(article_id, pdf_path)
+            storage.link_reading_list_to_article(item["toc_article_id"], article_id)
+        except Exception as e:
+            app.logger.error("[EmailJob] Download failed: %s — %s", item.get("title", ""), e)
+            failed.append({"title": item.get("title", "Unknown"), "error": str(e)})
+        finally:
+            if _download_lock_meta["session"] == sid:
+                _download_lock_meta.update({
+                    "acquired_at": None, "session": None,
+                    "article_id": None, "toc_article_id": None, "title": None,
+                })
+                _download_lock.release()
+            _start_next_queued()
+
+    # Send email with fresh item list (pdf_paths now populated)
+    _email_job["status"] = "sending"
+    fresh_items = storage.get_reading_list()
+    try:
+        attached = send_reading_list(
+            articles=fresh_items,
+            api_key=rc.resend_api_key,
+            from_addr=rc.resend_from,
+            to_addrs=to_addrs,
+            failed=failed if failed else None,
+        )
+        storage.mark_reading_list_sent()
+        _email_job.update({
+            "status": "done", "error": None,
+            "attached": attached, "failed_count": len(failed),
+        })
+        app.logger.info("[EmailJob] Done. %d PDFs attached, %d failed.", attached, len(failed))
+    except Exception as e:
+        app.logger.error("[EmailJob] Send failed: %s", e)
+        _email_job.update({"status": "failed", "error": str(e)})
+    finally:
+        _email_job["running"] = False
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -181,9 +361,9 @@ def serve_pdf(article_id: int):
 def download():
     """
     Accept JSON {input: "<pmid | doi | url>", toc_article_id: <int|null>}.
-    Resolves metadata immediately, saves a pending DB record, then triggers
-    the browser-based PDF download in a background thread.
-    Returns JSON {article_id, title, url}.
+    Resolves metadata immediately, saves a pending DB record, then either
+    starts the download immediately or queues it if one is already running.
+    Returns JSON {article_id, title, url, queued, position?}.
     """
     data = request.get_json(force=True)
     input_str = (data or {}).get("input", "").strip()
@@ -196,42 +376,54 @@ def download():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    if not _download_lock.acquire(blocking=False):
-        return jsonify({"error": "A download is already in progress — please wait for it to finish."}), 409
+    import time, uuid
+    # Force-release stale lock if held > 100s
+    if _download_lock_meta["acquired_at"] and (time.time() - _download_lock_meta["acquired_at"]) > 100:
+        app.logger.warning("[Download] Force-releasing stale lock (held > 100s)")
+        _download_lock_meta["acquired_at"] = None
+        _download_lock_meta["session"] = None
+        try:
+            _download_lock.release()
+        except RuntimeError:
+            pass
 
     try:
         article_id = storage.save_article(meta, pdf_path=None)
         runtime_cfg = get_runtime_config()
     except Exception as e:
-        _download_lock.release()
         app.logger.error("Download setup failed: %s", e, exc_info=True)
         return jsonify({"error": f"Server error while preparing download: {e}"}), 500
 
-    def _run():
-        try:
-            storage.set_download_error(article_id, "")  # clear any prior error on retry
-            if not runtime_cfg.huji_email or not runtime_cfg.huji_password:
-                raise ValueError(
-                    "HUJI credentials not configured — go to Settings to enter your email and password."
-                )
-            from download import download_article
-            _, pdf_path = download_article(meta.url, runtime_cfg)
-            storage.update_pdf_path(article_id, pdf_path)
-            if toc_article_id:
-                storage.link_reading_list_to_article(toc_article_id, article_id)
-        except Exception as e:
-            app.logger.error("[Download thread] article_id=%s error: %s", article_id, e, exc_info=True)
-            storage.set_download_error(article_id, str(e))
-        finally:
-            _download_lock.release()
+    title = meta.title or meta.url
 
-    threading.Thread(target=_run, daemon=True).start()
-
-    return jsonify({
-        "article_id": article_id,
-        "title": meta.title or meta.url,
-        "url": meta.url,
-    })
+    if _download_lock.acquire(blocking=False):
+        # Lock acquired — start immediately
+        sid = str(uuid.uuid4())
+        _download_lock_meta["acquired_at"] = time.time()
+        _download_lock_meta["session"] = sid
+        _download_lock_meta["article_id"] = article_id
+        _download_lock_meta["toc_article_id"] = toc_article_id
+        _download_lock_meta["title"] = title
+        threading.Thread(
+            target=_build_run(article_id, toc_article_id, meta, runtime_cfg, sid),
+            daemon=True,
+        ).start()
+        return jsonify({"article_id": article_id, "title": title, "url": meta.url, "queued": False})
+    else:
+        # Lock busy — add to queue if space available
+        with _queue_lock:
+            if len(_download_queue) >= MAX_QUEUE:
+                return jsonify({"error": f"Download queue is full ({MAX_QUEUE} items). Please wait."}), 429
+            _download_queue.append({
+                "article_id": article_id,
+                "toc_article_id": toc_article_id,
+                "meta": meta,
+                "runtime_cfg": runtime_cfg,
+                "title": title,
+            })
+            position = len(_download_queue)
+        app.logger.info("[Download] Queued article_id=%s at position %s", article_id, position)
+        return jsonify({"article_id": article_id, "title": title, "url": meta.url, "queued": True, "position": position})
 
 
 @app.route("/download/status/<int:article_id>")
@@ -245,6 +437,156 @@ def download_status(article_id: int):
     if art.get("download_error"):
         return jsonify({"status": "failed", "error": art["download_error"]})
     return jsonify({"status": "downloading"})
+
+
+@app.route("/download/report-error/<int:article_id>", methods=["POST"])
+def report_download_error(article_id: int):
+    """Send error report email for failed download."""
+    art = storage.get_by_id(article_id)
+    if not art:
+        return jsonify({"success": False, "error": "Article not found"}), 404
+
+    error_msg = art.get("download_error", "Unknown error")
+
+    # Gather context: last 30 log lines
+    log_lines = []
+    try:
+        with open("journal_club.log", "r", errors="ignore") as f:
+            all_lines = f.readlines()
+            log_lines = all_lines[-30:] if len(all_lines) > 30 else all_lines
+    except Exception as e:
+        log_lines = [f"Could not read logs: {e}"]
+
+    # Build error report
+    from datetime import datetime
+    report = {
+        "article_id": article_id,
+        "title": art.get("title", "Unknown"),
+        "doi": art.get("doi", "Unknown"),
+        "url": art.get("url", "Unknown"),
+        "error": error_msg,
+        "timestamp": datetime.now().isoformat(),
+        "logs": "".join(log_lines),
+    }
+
+    # Send email
+    try:
+        runtime_cfg = get_runtime_config()
+        from journal_club.mailer import send_error_report
+        send_error_report(report, runtime_cfg.resend_api_key)
+        app.logger.info(f"[ErrorReport] Sent for article_id={article_id}")
+        return jsonify({"success": True})
+    except Exception as e:
+        app.logger.error(f"[ErrorReport] Failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/download/active")
+def download_active():
+    """Return the currently active download and queue — used to restore UI state across page navigation."""
+    article_id = _download_lock_meta.get("article_id")
+    with _queue_lock:
+        queued = [
+            {"article_id": i["article_id"], "toc_article_id": i["toc_article_id"], "title": i["title"]}
+            for i in _download_queue
+        ]
+    if not article_id or not _download_lock_meta.get("acquired_at"):
+        return jsonify({"active": False, "queued": queued})
+    return jsonify({
+        "active": True,
+        "article_id": article_id,
+        "toc_article_id": _download_lock_meta.get("toc_article_id"),
+        "title": _download_lock_meta.get("title") or "",
+        "queued": queued,
+    })
+
+
+@app.route("/download/reset", methods=["POST"])
+def download_reset():
+    """Force-release the download lock and clear the queue. Use when a download is stuck."""
+    held = _download_lock_meta["acquired_at"] is not None
+    _download_lock_meta["acquired_at"] = None
+    _download_lock_meta["session"] = None
+    _download_lock_meta["article_id"] = None
+    _download_lock_meta["toc_article_id"] = None
+    _download_lock_meta["title"] = None
+    with _queue_lock:
+        queued_count = len(_download_queue)
+        _download_queue.clear()
+    if held:
+        try:
+            _download_lock.release()
+        except RuntimeError:
+            pass
+    app.logger.warning("[Download] Lock manually reset via /download/reset (queue cleared: %s items)", queued_count)
+    return jsonify({"ok": True, "was_held": held, "queue_cleared": queued_count})
+
+
+@app.route("/download/log")
+def download_log():
+    """Return the last 100 lines of journal_club.log as plain text."""
+    log_path = os.path.join(os.path.dirname(__file__), "journal_club.log")
+    if not os.path.exists(log_path):
+        return "No log file found.", 200, {"Content-Type": "text/plain"}
+    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    tail = "".join(lines[-100:])
+    return tail, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/jcdebug")
+def debug_page():
+    """Simple debug dashboard: lock state + live log tail."""
+    import time as _time
+    acquired_at = _download_lock_meta["acquired_at"]
+    held_secs = round(_time.time() - acquired_at, 1) if acquired_at else None
+    lock_state = {
+        "locked": acquired_at is not None,
+        "held_seconds": held_secs,
+        "session": _download_lock_meta["session"],
+    }
+    log_path = os.path.join(os.path.dirname(__file__), "journal_club.log")
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        log_tail = "".join(lines[-60:])
+    else:
+        log_tail = "(no log file yet)"
+
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Journal Club Debug</title>
+<meta http-equiv="refresh" content="5">
+<style>
+  body{{font-family:monospace;padding:20px;background:#0f1214;color:#e2e4e6}}
+  h2{{color:#4db8d4}}
+  .card{{background:#1e2124;padding:16px;border-radius:6px;margin-bottom:16px}}
+  .locked{{color:#f87171}} .free{{color:#4ade80}}
+  pre{{white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:500px;overflow:auto}}
+  button{{padding:8px 16px;background:#9f4200;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px}}
+  button:hover{{background:#c45200}}
+</style></head><body>
+<h2>Journal Club — Debug Dashboard</h2>
+<p style="color:#7a8490;font-size:12px">Auto-refreshes every 5 seconds</p>
+
+<div class="card">
+  <b>Download Lock</b><br><br>
+  Status: <span class="{'locked' if lock_state['locked'] else 'free'}">
+    {'🔒 LOCKED' if lock_state['locked'] else '🔓 FREE'}
+  </span><br>
+  {'Held for: <b>' + str(held_secs) + 's</b>' if held_secs is not None else ''}
+  <br><br>
+  <form method="POST" action="./download/reset">
+    <button type="submit">Force Reset Lock</button>
+  </form>
+</div>
+
+<div class="card">
+  <b>Last 60 log lines</b> &nbsp;<a href="./download/log" style="color:#4db8d4;font-size:12px" target="_blank">view full log</a>
+  <pre>{log_tail.replace('<','&lt;').replace('>','&gt;')}</pre>
+</div>
+</body></html>"""
+    return html
 
 
 @app.route("/bookmark/<int:article_id>", methods=["POST"])
@@ -382,6 +724,9 @@ def reading_list_remove():
 
 @app.route("/reading-list/email", methods=["POST"])
 def reading_list_email():
+    with _email_job_lock:
+        if _email_job["running"]:
+            return jsonify({"error": "Email job already running"}), 409
     rc = get_runtime_config()
     if not rc.resend_api_key or not rc.resend_from:
         return jsonify({"error": "Email not configured — go to Settings"}), 400
@@ -391,17 +736,22 @@ def reading_list_email():
     items = storage.get_reading_list()
     if not items:
         return jsonify({"error": "Reading list is empty"}), 400
-    try:
-        attached = send_reading_list(
-            articles=items,
-            api_key=rc.resend_api_key,
-            from_addr=rc.resend_from,
-            to_addrs=to_addrs,
-        )
-        storage.mark_reading_list_sent()
-        return jsonify({"status": "sent", "articles": len(items), "pdfs_attached": attached})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
+    with _email_job_lock:
+        _email_job.update({
+            "running": True, "status": "downloading",
+            "current": 0,
+            "total": len([it for it in items if not it.get("pdf_path")]),
+            "error": None, "attached": 0, "failed_count": 0,
+        })
+
+    threading.Thread(target=_run_email_job, args=(items, rc), daemon=True).start()
+    return jsonify({"status": "started", "total": len(items)})
+
+
+@app.route("/reading-list/email/status")
+def reading_list_email_status():
+    return jsonify(dict(_email_job))
 
 
 # ── Settings routes ──────────────────────────────────────────────────────────
@@ -463,4 +813,4 @@ def admin_settings_save():
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, use_reloader=False)
+    app.run(debug=True, port=5001, use_reloader=False)

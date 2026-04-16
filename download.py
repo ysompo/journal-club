@@ -11,6 +11,7 @@ import sys
 import os
 import time
 import re
+import json as _json
 
 from journal_club.config import load_config, Config
 from journal_club.browser import launch_browser, set_download_behavior
@@ -25,6 +26,35 @@ from journal_club.auth_ovid import authenticate_ovid
 from journal_club.auth_elsevier import authenticate_elsevier
 from journal_club.auth_openathens import authenticate_openathens
 from journal_club.auth_springer import authenticate_springer
+
+
+_COOKIE_FILE = ".jc_session_cookies.json"
+
+
+def _load_cookies(context, cfg) -> None:
+    """Load saved session cookies from disk into the Playwright context."""
+    cookie_path = os.path.join(cfg.output_dir, _COOKIE_FILE)
+    if not os.path.exists(cookie_path):
+        return
+    try:
+        with open(cookie_path, "r", encoding="utf-8") as f:
+            cookies = _json.load(f)
+        context.add_cookies(cookies)
+        print(f"[Cookies] Loaded {len(cookies)} session cookies")
+    except Exception as e:
+        print(f"[Cookies] Could not load cookies: {e}")
+
+
+def _save_cookies(context, cfg) -> None:
+    """Save all current Playwright context cookies to disk."""
+    try:
+        cookies = context.cookies()
+        cookie_path = os.path.join(cfg.output_dir, _COOKIE_FILE)
+        with open(cookie_path, "w", encoding="utf-8") as f:
+            _json.dump(cookies, f)
+        print(f"[Cookies] Saved {len(cookies)} session cookies")
+    except Exception as e:
+        print(f"[Cookies] Could not save cookies: {e}")
 
 
 def slugify(url: str) -> str:
@@ -80,6 +110,21 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
         with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
             captured = attach_pdf_hooks(context, page)
             set_download_behavior(context, page, cfg.output_dir)
+            _load_cookies(context, cfg)
+
+            # For ScienceDirect: visit the homepage first so Cloudflare can run its
+            # invisible JavaScript challenge and issue a cf_clearance cookie.
+            # Direct article navigation on a fresh profile is blocked before any
+            # cookies are set.
+            if publisher == Publisher.ELSEVIER or "sciencedirect.com" in article_url:
+                print("[Elsevier] Warming up Cloudflare session via homepage...")
+                try:
+                    page.goto("https://www.sciencedirect.com",
+                              wait_until="domcontentloaded", timeout=20_000)
+                    time.sleep(3)  # let Cloudflare JS challenge complete
+                    print(f"   Homepage loaded: {page.title()[:60]}")
+                except Exception as _e:
+                    print(f"   Homepage warm-up error (continuing): {_e}")
 
             page.goto(article_url, wait_until="domcontentloaded")
             time.sleep(3)
@@ -93,6 +138,7 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
                     email=cfg.huji_email,
                     password=cfg.huji_password,
                     captured=captured,
+                    output_dir=cfg.output_dir,
                 )
                 auth_pdf_url = None
                 if publisher == Publisher.JAMA:
@@ -106,7 +152,7 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
                 else:  # OPENATHENS_GENERIC
                     auth_pdf_url = authenticate_openathens(**auth_kwargs)
 
-                wait_for_pdf(captured, timeout_s=15)
+                wait_for_pdf(captured, timeout_s=15, output_dir=cfg.output_dir)
 
                 fallback_url = pdf_url or auth_pdf_url
                 if not captured and fallback_url:
@@ -117,11 +163,14 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
                     try:
                         pdf_tab = context.new_page()
                         pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
-                        wait_for_pdf(captured, timeout_s=45)
+                        wait_for_pdf(captured, timeout_s=45, output_dir=cfg.output_dir)
                     except Exception as e:
                         print(f"   Fallback error: {e}")
 
             time.sleep(5)  # grace period for in-flight PDF downloads
+
+            if captured:
+                _save_cookies(context, cfg)
 
         if captured:
             break

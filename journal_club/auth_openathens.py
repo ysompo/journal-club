@@ -74,32 +74,45 @@ def _select_huji_on_wayfinder(page: Page) -> None:
     dismiss_cookies(page)
     time.sleep(1)
 
-    # Type into the institution search field
-    for sel in _INSTITUTION_INPUT_SELS:
-        try:
-            page.click(sel, timeout=3000)
-            page.fill(sel, "")
-            page.type(sel, "Hebrew University of Jerusalem", delay=50)
-            print(f"   [OA] Typed institution into: {sel}")
-            # Wait for dropdown to populate
+    for search_term in ("Hebrew University of Jerusalem", "Hebrew University"):
+        # Type into the institution search field
+        for sel in _INSTITUTION_INPUT_SELS:
             try:
-                page.wait_for_selector("a.sso-institution, div.ms-res-item", timeout=5000)
-                print("   [OA] Dropdown appeared")
+                page.click(sel, timeout=3000)
+                page.fill(sel, "")
+                page.type(sel, search_term, delay=60)
+                print(f"   [OA] Typed '{search_term}' into: {sel}")
+                # Wait longer — Atypon API can be slow on first load
+                try:
+                    page.wait_for_selector(
+                        "a.sso-institution, div.ms-res-item", timeout=10_000)
+                    print("   [OA] Dropdown appeared")
+                except Exception:
+                    time.sleep(3)
+                break
             except Exception:
-                time.sleep(2)
-            break
-        except Exception:
-            continue
+                continue
 
-    # Click the HUJI result
-    for sel in _INSTITUTION_RESULT_SELS:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   [OA] Selected institution: {sel}")
-            time.sleep(2)
-            return
-        except Exception:
-            continue
+        # Click the HUJI result
+        for sel in _INSTITUTION_RESULT_SELS:
+            try:
+                page.click(sel, timeout=5000)
+                print(f"   [OA] Selected institution: {sel}")
+                time.sleep(2)
+                return  # success
+            except Exception:
+                continue
+
+        # Clear the field before retrying with shorter term
+        print(f"   [OA] No result for '{search_term}' — retrying...")
+        for sel in _INSTITUTION_INPUT_SELS:
+            try:
+                page.fill(sel, "")
+                break
+            except Exception:
+                continue
+        time.sleep(1)
+
     print("   [OA] Could not find HUJI in results — may need manual selection")
 
 
@@ -176,8 +189,44 @@ def _find_pdf_url(page: Page, article_url: str) -> str | None:
         return None
 
 
-def _fetch_pdf_in_tab(page: Page, pdf_url: str, captured: list) -> None:
-    """Open pdf_url in a new tab and wait for the Chrome extension to deliver bytes."""
+def _capture_response_body_pdf(page: Page, pdf_url: str, captured: list) -> bool:
+    """Capture PDF via route interception (response body, not download). Returns True if successful."""
+    pdf_tab = page.context.new_page()
+    pdf_data = []
+
+    def intercept_route(route, request):
+        try:
+            response = route.fetch()
+            body = response.body()
+            if body[:4] == b'%PDF':
+                pdf_data.append(body)
+                print(f"   [pdftab/route] ✓ Captured {len(body):,} bytes via route interception")
+        except Exception as e:
+            print(f"   [pdftab/route] Error intercepting: {e}")
+        route.continue_()
+
+    pdf_tab.route("**/*.pdf", intercept_route)
+    try:
+        pdf_tab.goto(pdf_url, wait_until="networkidle", timeout=20_000)
+    except Exception as e:
+        print(f"   [pdftab/route] Navigation error: {e}")
+
+    if pdf_data and not captured:
+        captured.append(pdf_data[0])
+        print(f"   [pdftab] ✓ PDF captured via response-body interception: {len(pdf_data[0]):,} bytes")
+        pdf_tab.close()
+        return True
+
+    pdf_tab.close()
+    return False
+
+
+def _capture_download_pdf(page: Page, pdf_url: str, captured: list, output_dir: str = None) -> bool:
+    """Try to capture PDF via file download. Returns True if successful, False otherwise."""
+    import os as _os
+    import tempfile as _tmp
+    from playwright.sync_api import TimeoutError as _PlaywrightTimeout
+
     pdf_tab = page.context.new_page()
 
     def _log_response(resp):
@@ -190,21 +239,57 @@ def _fetch_pdf_in_tab(page: Page, pdf_url: str, captured: list) -> None:
 
     for attempt in (1, 2):
         try:
-            pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+            with pdf_tab.expect_download(timeout=180_000) as dl_info:
+                try:
+                    pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
+                except Exception as e:
+                    # Navigation raises when the response is a file download — that's OK
+                    print(f"   [pdftab] goto raised (attempt {attempt}, may be download): {e}")
+            dl = dl_info.value
+            tmp_path = _os.path.join(_tmp.mkdtemp(), dl.suggested_filename or "article.pdf")
+            print(f"   [pdftab] Saving download: {dl.suggested_filename}")
+            dl.save_as(tmp_path)  # blocks until complete; browser stays open
+            with open(tmp_path, "rb") as f:
+                body = f.read()
+            if body[:4] == b'%PDF':
+                captured.append(body)
+                print(f"   [pdftab] ✓ PDF captured via file download: {len(body):,} bytes")
+                pdf_tab.close()
+                return True
+        except _PlaywrightTimeout:
+            # No file-download event — PDF may come via response hooks (navigation)
+            print(f"   [pdftab] No download event (attempt {attempt}) — will try response-body fallback")
         except Exception as e:
-            # Navigation raises when the response is a file download — that's OK
-            print(f"   [pdftab] goto raised (attempt {attempt}, may be download): {e}")
-        time.sleep(3)
-        if wait_for_pdf(captured, timeout_s=30 if attempt == 1 else 20):
-            return
+            print(f"   [pdftab] Error (attempt {attempt}): {e}")
+
+        if wait_for_pdf(captured, timeout_s=20, output_dir=output_dir):
+            pdf_tab.close()
+            return True
         if attempt == 1:
             print("   [OA] Retrying PDF navigation...")
+
+    pdf_tab.close()
+    return False
+
+
+def _fetch_pdf_in_tab(page: Page, pdf_url: str, captured: list, output_dir: str = None) -> None:
+    """
+    Try to capture PDF via download first (works for Wiley, BMJ, OUP, etc.).
+    If download fails or times out, fall back to response-body interception
+    (works for NEJM, Lancet, and other publishers serving PDFs as response bodies).
+    """
+    print(f"   [pdftab] Attempting download-based capture...")
+    if _capture_download_pdf(page, pdf_url, captured, output_dir):
+        return  # Success via download
+
+    print(f"   [pdftab] Download approach failed — attempting response-body fallback...")
+    _capture_response_body_pdf(page, pdf_url, captured)
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def authenticate_openathens(page: Page, article_url: str, email: str, password: str,
-                             captured: list) -> str | None:
+                             captured: list, output_dir: str = None) -> str | None:
     """
     Generic OpenAthens / Atypon SSO auth flow for NEJM, BMJ, OUP, Wiley, etc.
 
@@ -316,7 +401,7 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
 
     if pdf_url:
         print(f"   PDF URL: {pdf_url[:80]}")
-        _fetch_pdf_in_tab(page, pdf_url, captured)
+        _fetch_pdf_in_tab(page, pdf_url, captured, output_dir)
     else:
         # Last resort: click a Download PDF button in the article DOM
         print("   No PDF URL found — trying Download PDF click...")

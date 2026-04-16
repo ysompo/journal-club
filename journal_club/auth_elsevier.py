@@ -64,7 +64,7 @@ def _select_huji(page: Page) -> None:
 
 
 def authenticate_elsevier(page: Page, article_url: str, email: str, password: str,
-                           captured: list):
+                           captured: list, output_dir: str = None):
     """Elsevier/ScienceDirect auth flow."""
     print(f"\n[Elsevier Auth] Article: {article_url[:60]}")
     page.goto(article_url, wait_until="domcontentloaded")
@@ -85,11 +85,39 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     current = page.url
     print(f"   [Elsevier] Landed on: {current[:80]}")
 
+    # Screenshot immediately after initial load so we can see what the page shows
+    import datetime as _dt0
+    try:
+        _ts0 = _dt0.datetime.now().strftime("%H%M%S")
+        page.screenshot(path=f"debug_elsevier_landed_{_ts0}.png")
+        print(f"   [Elsevier] Landing screenshot: debug_elsevier_landed_{_ts0}.png")
+    except Exception:
+        pass
+
+    # ── Fast-path: check whether the PDF link is already accessible ───────────
+    # If valid session cookies are present from a previous auth, the article page
+    # loads with the institutional PDF download link already visible.  In that
+    # case skip the entire auth flow (all three strategies + HUJI login) and jump
+    # straight to the PDF download section below.  This avoids wasting 3-4 minutes
+    # on selector timeouts that will never match.
+    _pdf_accessible = False
+    try:
+        _pdf_accessible = bool(page.evaluate("""() =>
+            !!document.querySelector(
+                'a[href*="showPdf"], a[href*="pdfft"], a[href*="/doi/pdf"], '
+                + 'a[href$=".pdf"]'
+            )
+        """))
+        if _pdf_accessible:
+            print("   [Elsevier] PDF link visible — session cookies valid, skipping auth flow")
+    except Exception as _e:
+        print(f"   [Elsevier] Fast-path check error: {_e}")
+
     # ── Strategy 1: click "Access through Hebrew University" if visible ────────
     # ScienceDirect article pages (e.g. /science/article/pii/...) show an
     # "Access through Hebrew University of Jeru..." button when the institution
     # is recognized.  This is the fastest auth path — click it first.
-    if not any(d in page.url for d in _AUTH_DOMAINS):
+    if not _pdf_accessible and not any(d in page.url for d in _AUTH_DOMAINS):
         dismiss_cookies(page)
         time.sleep(1)
         dismiss_cookies(page)  # ScienceDirect often re-shows after JS loads
@@ -120,7 +148,7 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     # On Elsevier journal platforms (ajog.org, thelancet.com), navigating
     # to /fulltext when unauthenticated triggers an auth redirect to
     # id.elsevier.com.  Works for /abstract URLs and also /science/article/pii.
-    if not any(d in page.url for d in _AUTH_DOMAINS):
+    if not _pdf_accessible and not any(d in page.url for d in _AUTH_DOMAINS):
         fulltext_url = None
         if "/abstract" in current:
             fulltext_url = current.replace("/abstract", "/fulltext")
@@ -141,7 +169,7 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
                 print(f"   [Elsevier] Fulltext nav error (may be redirect): {e}")
 
     # ── Strategy 3: click sign-in / access buttons (last resort) ───────────────
-    if not any(d in page.url for d in _AUTH_DOMAINS):
+    if not _pdf_accessible and not any(d in page.url for d in _AUTH_DOMAINS):
         import datetime as _dt
         _ts = _dt.datetime.now().strftime("%H%M%S")
         try:
@@ -213,107 +241,112 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
                 except Exception:
                     continue
 
-    print(f"   [Elsevier] URL after click attempts: {page.url[:80]}")
-
-    # ── Wait for auth/IdP page ─────────────────────────────────────────────────
-    try:
-        page.wait_for_function(
-            """() => {
-                const u = window.location.href;
-                return u.includes('id.elsevier.com') ||
-                       u.includes('sciencedirect.com/user/ropc') ||
-                       u.includes('wayfinder') ||
-                       u.includes('openathens') ||
-                       u.includes('huji.ac.il');
-            }""",
-            timeout=30_000,
-        )
-        current = page.url
-        print(f"   [Elsevier] Auth page: {current[:80]}")
-
-        if 'id.elsevier.com' in current or 'sciencedirect.com/user/ropc' in current:
-            # Elsevier's own IdP — click "Continue with your institution" then search
-            dismiss_cookies(page)
-            for sel in [
-                "button:has-text('Continue with your institution')",
-                "a:has-text('Continue with your institution')",
-                "button:has-text('Access through your institution')",
-                "a:has-text('your institution')",
-                "button:has-text('your institution')",
-                "a[href*='institution']",
-            ]:
-                try:
-                    page.click(sel, timeout=4000)
-                    print(f"   [Elsevier] Clicked IdP institution btn: {sel}")
-                    time.sleep(3)
-                    break
-                except Exception:
-                    continue
-            _select_huji(page)
-            time.sleep(3)
-        elif 'wayfinder' in current or 'openathens' in current:
-            _select_huji(page)
-
-    except Exception as e:
-        print(f"   [Elsevier] Auth wait: {e}")
-
-    wait_for_huji_and_login(page, email, password)
-
-    print("\n[Elsevier] Waiting to return to journal...")
-    try:
-        page.wait_for_function(
-            """() => {
-                const u = window.location.href;
-                return !u.includes('huji.ac.il') &&
-                       !u.includes('openathens') &&
-                       !u.includes('id.elsevier.com') &&
-                       !u.includes('login');
-            }""",
-            timeout=90_000,
-        )
-        print(f"   Back: {page.url[:80]}")
-    except Exception:
-        print(f"   Timeout. URL: {page.url}")
-
-    # After HUJI login, ScienceDirect may kick off a second OAuth2 round-trip
-    # through id.elsevier.com before the final article page is ready.
-    # Wait for ALL navigation to settle before touching the page.
-    try:
-        page.wait_for_load_state("networkidle", timeout=20_000)
-    except Exception:
-        pass
-    time.sleep(2)
-
-    # Navigate to article — guard against being interrupted by OAuth callback
-    try:
-        page.goto(article_url, wait_until="domcontentloaded")
+    if not _pdf_accessible:
         try:
-            page.wait_for_load_state("networkidle", timeout=8000)
+            print(f"   [Elsevier] URL after click attempts: {page.url[:80]}")
         except Exception:
-            pass
-    except Exception as e:
-        print(f"   [Elsevier] Post-auth nav interrupted (OAuth in progress): {e}")
-        # Just wait for whatever navigation is in flight to finish
+            print("   [Elsevier] Browser closed before auth could complete")
+            return
+
+        # ── Wait for auth/IdP page ─────────────────────────────────────────────
         try:
-            page.wait_for_load_state("networkidle", timeout=30_000)
+            page.wait_for_function(
+                """() => {
+                    const u = window.location.href;
+                    return u.includes('id.elsevier.com') ||
+                           u.includes('sciencedirect.com/user/ropc') ||
+                           u.includes('wayfinder') ||
+                           u.includes('openathens') ||
+                           u.includes('huji.ac.il');
+                }""",
+                timeout=30_000,
+            )
+            current = page.url
+            print(f"   [Elsevier] Auth page: {current[:80]}")
+
+            if 'id.elsevier.com' in current or 'sciencedirect.com/user/ropc' in current:
+                # Elsevier's own IdP — click "Continue with your institution" then search
+                dismiss_cookies(page)
+                for sel in [
+                    "button:has-text('Continue with your institution')",
+                    "a:has-text('Continue with your institution')",
+                    "button:has-text('Access through your institution')",
+                    "a:has-text('your institution')",
+                    "button:has-text('your institution')",
+                    "a[href*='institution']",
+                ]:
+                    try:
+                        page.click(sel, timeout=4000)
+                        print(f"   [Elsevier] Clicked IdP institution btn: {sel}")
+                        time.sleep(3)
+                        break
+                    except Exception:
+                        continue
+                _select_huji(page)
+                time.sleep(3)
+            elif 'wayfinder' in current or 'openathens' in current:
+                _select_huji(page)
+
+        except Exception as e:
+            print(f"   [Elsevier] Auth wait: {e}")
+
+        wait_for_huji_and_login(page, email, password)
+
+        print("\n[Elsevier] Waiting to return to journal...")
+        try:
+            page.wait_for_function(
+                """() => {
+                    const u = window.location.href;
+                    return !u.includes('huji.ac.il') &&
+                           !u.includes('openathens') &&
+                           !u.includes('id.elsevier.com') &&
+                           !u.includes('login');
+                }""",
+                timeout=90_000,
+            )
+            print(f"   Back: {page.url[:80]}")
         except Exception:
-            pass
+            print(f"   Timeout. URL: {page.url}")
 
-    time.sleep(2)
-
-    # Reload the article page so the pdfft token is freshly minted for the
-    # fully-established authenticated session (the post-OAuth state may not
-    # yet have had a chance to write its own session cookies before page.goto).
-    print("   Reloading to get fresh authenticated page...")
-    try:
-        page.reload(wait_until="domcontentloaded")
+        # After HUJI login, ScienceDirect may kick off a second OAuth2 round-trip
+        # through id.elsevier.com before the final article page is ready.
+        # Wait for ALL navigation to settle before touching the page.
         try:
-            page.wait_for_load_state("networkidle", timeout=8000)
+            page.wait_for_load_state("networkidle", timeout=20_000)
         except Exception:
             pass
         time.sleep(2)
-    except Exception as e:
-        print(f"   [Elsevier] Reload error: {e}")
+
+        # Navigate to article — guard against being interrupted by OAuth callback
+        try:
+            page.goto(article_url, wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"   [Elsevier] Post-auth nav interrupted (OAuth in progress): {e}")
+            # Just wait for whatever navigation is in flight to finish
+            try:
+                page.wait_for_load_state("networkidle", timeout=30_000)
+            except Exception:
+                pass
+
+        time.sleep(2)
+
+        # Reload the article page so the pdfft token is freshly minted for the
+        # fully-established authenticated session (the post-OAuth state may not
+        # yet have had a chance to write its own session cookies before page.goto).
+        print("   Reloading to get fresh authenticated page...")
+        try:
+            page.reload(wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            time.sleep(2)
+        except Exception as e:
+            print(f"   [Elsevier] Reload error: {e}")
 
     print(f"   Authenticated page: {page.title()[:80]}")
 
@@ -332,72 +365,216 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
 
     print("\n[Elsevier] Downloading PDF from authenticated page...")
 
-    # Try clicking the PDF link element directly (most reliable)
-    _pdf_link_sels = [
-        "a[href*='pdfft']",
-        "a:has-text('View PDF')",
-        "button:has-text('View PDF')",
-        "a:has-text('Download PDF')",
-        "button:has-text('Download PDF')",
-        "a[href*='/pdf/']",
-    ]
+    import os as _os, tempfile as _tmp, json as _json
+    from playwright.sync_api import TimeoutError as _PlaywrightTimeout
 
-    clicked = False
-    for sel in _pdf_link_sels:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   [Elsevier] Clicked PDF link: {sel}")
-            clicked = True
-            break
-        except Exception:
-            continue
+    # Give JavaScript time to render the PDF download button (AJOG / Elsevier pages
+    # are heavily JS-driven and may not show the button until hydration completes).
+    try:
+        page.wait_for_load_state("networkidle", timeout=10_000)
+    except Exception:
+        pass
+    time.sleep(2)
 
-    if not clicked:
-        # Fallback: extract URL from DOM and open via window.open (preserves opener)
-        print("   [Elsevier] No clickable PDF link — extracting URL from DOM...")
-        try:
-            pdf_url = page.evaluate("""() => {
-                const links = Array.from(document.querySelectorAll('a[href]'));
-                const pdf = links.find(a =>
-                    (a.href.includes('pdfft') || a.href.includes('/pdf/') ||
-                     a.href.endsWith('.pdf') || a.href.includes('pdf.sciencedirect')) &&
-                    (a.innerText || a.textContent || '').toLowerCase().includes('pdf')
-                );
-                return pdf ? pdf.href : null;
-            }""")
-        except Exception:
-            pdf_url = None
+    # ── Strategy 1: Navigate to PDF URL via window.open ────────────────────────
+    # Atypon/AJOG's "Download PDF" href (e.g. /action/showPdf?pii=...) is an
+    # HTML page that uses JavaScript to redirect to the actual PDF URL.  If we
+    # let Chrome handle this as a CDP file-download (via expect_download), it
+    # saves the HTML page before JS can run, producing a non-PDF file.
+    #
+    # window.open() from the authenticated article page:
+    #   • sets the opener + Referer so Cloudflare / anti-hotlink checks pass
+    #   • runs JavaScript, so showPdf → pdfft redirect chains work
+    #   • the pdf_capture response hook (registered via context.on("page"))
+    #     captures the final PDF response, or the download hook saves it
+    pdf_href = None
+    try:
+        pdf_href = page.evaluate("""() => {
+            const links = Array.from(document.querySelectorAll('a[href]'));
 
-        if pdf_url:
-            print(f"   [Elsevier] Opening via window.open: {pdf_url[:80]}")
-            page.evaluate(f"window.open('{pdf_url}', '_blank')")
-            clicked = True
-        else:
-            print("   [Elsevier] No PDF URL found in DOM")
+            // Strategy 1: Prefer Elsevier/ScienceDirect domain links (article's own PDF)
+            // These use showPdf, pdfft, /action/download, etc.
+            const elsevier_pdf = links.find(a => {
+                const h = (a.href || '').toLowerCase();
+                const is_elsevier = h.includes('sciencedirect.com') ||
+                                  h.includes('showpdf') ||
+                                  h.includes('pdfft') ||
+                                  h.includes('/action/download') ||
+                                  h.includes('pdf.sciencedirectassets.com');
+                const is_pdf = h.includes('pdf') || h.endsWith('.pdf');
+                return is_elsevier && is_pdf;
+            });
+            if (elsevier_pdf) {
+                console.log('[PDF] Found Elsevier domain PDF: ' + elsevier_pdf.href);
+                return elsevier_pdf.href;
+            }
 
-    if clicked:
-        # Wait for PDF capture from response/download hooks
-        # (hooks auto-registered on new tabs via context.on("page") in pdf_capture)
-        if not wait_for_pdf(captured, timeout_s=60):
-            # If the ScienceDirect Reader opened, try its download button
-            print("   [Elsevier] PDF not captured yet — checking for Reader page...")
-            for p in page.context.pages:
-                if p == page:
-                    continue
-                purl = p.url
-                if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets', 'pdf')):
-                    print(f"   [Elsevier] Found PDF/Reader page: {purl[:80]}")
-                    for dl_sel in [
-                        "button[title='Download']",
-                        "button:has-text('Download')",
-                        "a:has-text('Download')",
-                        "#download-btn",
-                    ]:
-                        try:
-                            p.click(dl_sel, timeout=5000)
-                            print(f"   [Elsevier] Clicked reader download: {dl_sel}")
-                            break
-                        except Exception:
-                            continue
+            // Strategy 2: Prefer links with PDF text that are Elsevier endpoints
+            const text_pdf = links.find(a => {
+                const t = (a.innerText || a.textContent || '').toLowerCase();
+                const h = (a.href || '').toLowerCase();
+                const has_pdf_text = t.includes('pdf') || t.includes('download');
+                const is_elsevier_endpoint = h.includes('showpdf') ||
+                                           h.includes('pdfft') ||
+                                           h.includes('sciencedirect') ||
+                                           h.includes('/doi/pdf');
+                return has_pdf_text && is_elsevier_endpoint;
+            });
+            if (text_pdf) {
+                console.log('[PDF] Found PDF via text + Elsevier endpoint: ' + text_pdf.href);
+                return text_pdf.href;
+            }
+
+            // Strategy 3: ANY PDF link on Elsevier domain (fallback)
+            const any_elsevier = links.find(a => {
+                const h = (a.href || '').toLowerCase();
+                return (h.includes('sciencedirect.com') || h.includes('showpdf') ||
+                       h.includes('pdfft') || h.includes('pdf.sciencedirectassets')) &&
+                       (h.includes('pdf') || h.endsWith('.pdf'));
+            });
+            if (any_elsevier) {
+                console.log('[PDF] Found any Elsevier PDF: ' + any_elsevier.href);
+                return any_elsevier.href;
+            }
+
+            // Strategy 4: LAST RESORT - any PDF link (including external citations)
+            const any_pdf = links.find(a => {
+                const h = (a.href || '').toLowerCase();
+                return h.includes('pdf') || h.endsWith('.pdf');
+            });
+            if (any_pdf) {
+                console.log('[PDF] WARNING: Falling back to external PDF: ' + any_pdf.href);
+                return any_pdf.href;
+            }
+
+            console.log('[PDF] No PDF link found');
+            return null;
+        }""")
+    except Exception as e:
+        print(f"   [Elsevier] DOM eval error: {e}")
+
+    if pdf_href:
+        print(f"   [Elsevier] PDF href: {pdf_href[:80]}")
+
+        # ── Strategy A: click the actual link element on the page ─────────────
+        # A real DOM click is a genuine user gesture — it bypasses Chrome's popup
+        # blocker entirely and preserves the opener + Referer context that Elsevier
+        # requires.  The route interceptor for **/showPdf** (registered in
+        # pdf_capture.attach_pdf_hooks) captures the PDF bytes before Chrome's
+        # viewer can consume them, so we never need to read the response via CDP.
+        pdf_link_clicked = False
+        for sel in [
+            "a[href*='showPdf']",
+            "a[href*='pdfft']",
+            "a:has-text('Download PDF')",
+            "button:has-text('Download PDF')",
+            "a:has-text('PDF')",
+            "button:has-text('PDF')",
+        ]:
+            try:
+                page.click(sel, timeout=5000)
+                print(f"   [Elsevier] Clicked PDF link: {sel}")
+                pdf_link_clicked = True
+                break
+            except Exception:
+                continue
+
+        if not pdf_link_clicked:
+            # ── Strategy B: window.open() — route interceptor still handles it ──
+            # Use expect_popup() so we know whether Chrome actually opened the tab.
+            from playwright.sync_api import TimeoutError as _PwTimeout
+            try:
+                with page.expect_popup(timeout=10_000) as _popup_info:
+                    page.evaluate(f"window.open({_json.dumps(pdf_href)}, '_blank')")
+                print("   [Elsevier] Popup opened via window.open")
+            except _PwTimeout:
+                print("   [Elsevier] window.open blocked/timed-out — route interceptor may still capture")
+
+        if not captured:
+            if wait_for_pdf(captured, timeout_s=120, output_dir=output_dir):
+                pass  # captured via route interception, response hook, or download hook
+            else:
+                # Check if an Elsevier Reader or PDF viewer tab is open
+                print("   [Elsevier] PDF not captured — checking open tabs...")
+                for p in page.context.pages:
+                    if p == page:
+                        continue
+                    purl = p.url
+                    print(f"   [Elsevier] Open tab: {purl[:80]}")
+                    if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
+                                                'showpdf', 'pdfft', '/pdf/')):
+                        print(f"   [Elsevier] Found PDF/Reader tab, trying Download button...")
+                        for dl_sel in ["button[title='Download']", "button:has-text('Download')",
+                                       "a:has-text('Download')", "#download-btn"]:
+                            try:
+                                p.click(dl_sel, timeout=5000)
+                                print(f"   [Elsevier] Clicked reader download: {dl_sel}")
+                                break
+                            except Exception:
+                                continue
+                wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+    else:
+        # ── Strategy 2: no href found — try clicking PDF buttons ───────────────
+        # Used for ScienceDirect articles where the PDF button may be a <button>
+        # that navigates or posts a form rather than having an href.
+        print("   [Elsevier] No PDF href in DOM — trying button clicks...")
+
+        _pdf_link_sels = [
+            "a[href*='pdfft']",
+            "a:has-text('View PDF')",
+            "button:has-text('View PDF')",
+            "a:has-text('Download PDF')",
+            "button:has-text('Download PDF')",
+            "a[href*='/pdf/']",
+        ]
+
+        clicked = False
+        for sel in _pdf_link_sels:
+            click_succeeded = False
+            try:
+                with page.expect_download(timeout=30_000) as dl_info:
+                    page.click(sel, timeout=5000)
+                    click_succeeded = True
+                    print(f"   [Elsevier] Clicked: {sel}")
+                dl = dl_info.value
+                tmp_path = _os.path.join(_tmp.mkdtemp(), dl.suggested_filename or "article.pdf")
+                print(f"   [Elsevier] Saving download: {dl.suggested_filename}")
+                dl.save_as(tmp_path)
+                with open(tmp_path, "rb") as f:
+                    body = f.read()
+                if body[:4] == b'%PDF':
+                    captured.append(body)
+                    print(f"   [Elsevier] ✓ PDF via download: {len(body):,} bytes")
+                else:
+                    print(f"   [Elsevier] Downloaded file not PDF (starts: {body[:30]!r})")
+                clicked = True
+                break
+            except _PlaywrightTimeout:
+                if click_succeeded:
+                    print(f"   [Elsevier] No download event for {sel} — using response hooks")
+                    clicked = True
                     break
-            wait_for_pdf(captured, timeout_s=30)
+                else:
+                    continue   # element not found, try next
+            except Exception:
+                continue
+
+        if clicked and not captured:
+            if not wait_for_pdf(captured, timeout_s=60, output_dir=output_dir):
+                print("   [Elsevier] PDF not captured — checking Reader page...")
+                for p in page.context.pages:
+                    if p == page:
+                        continue
+                    purl = p.url
+                    if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets', 'pdf')):
+                        print(f"   [Elsevier] Found Reader page: {purl[:80]}")
+                        for dl_sel in ["button[title='Download']", "button:has-text('Download')",
+                                       "a:has-text('Download')", "#download-btn"]:
+                            try:
+                                p.click(dl_sel, timeout=5000)
+                                print(f"   [Elsevier] Clicked reader download: {dl_sel}")
+                                break
+                            except Exception:
+                                continue
+                        break
+                wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)

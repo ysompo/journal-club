@@ -47,7 +47,7 @@ def _select_institution_on_wayfinder(page: Page):
     print("   [Ovid] Could not click wayfinder result — check selectors")
 
 def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
-                      captured: list):
+                      captured: list, output_dir: str = None):
     """Full LWW/Ovid auth flow."""
     ovid_url = _build_ovid_login_url(article_url)
     print(f"\n[Ovid Auth] Navigating to Ovid login: {ovid_url[:60]}")

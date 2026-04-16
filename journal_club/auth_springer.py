@@ -5,7 +5,7 @@ from playwright.sync_api import Page
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 def authenticate_springer(page: Page, article_url: str, email: str, password: str,
-                           captured: list):
+                           captured: list, output_dir: str = None):
     """SpringerNature subscription auth flow (used only if OA check failed)."""
     from urllib.parse import quote
     print(f"\n[Springer Auth] Article: {article_url[:60]}")
@@ -123,10 +123,10 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         pdf_tab = page.context.new_page()
         pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
         from journal_club.pdf_capture import wait_for_pdf
-        if not wait_for_pdf(captured, timeout_s=45):
+        if not wait_for_pdf(captured, timeout_s=45, output_dir=output_dir):
             print("   [Springer] Chrome extension did not fire — retrying navigation...")
             pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
-            wait_for_pdf(captured, timeout_s=30)
+            wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
     else:
         for sel in [
             "a:has-text('Download PDF')",
