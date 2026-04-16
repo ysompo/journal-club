@@ -24,6 +24,13 @@ from journal_club.mailer import send_reading_list
 from journal_club.logging_config import configure_logging
 import journal_club.storage as storage
 
+# Ensure Playwright browsers are installed (for Render deployment)
+try:
+    from ensure_playwright import ensure_playwright_browsers
+    ensure_playwright_browsers()
+except ImportError:
+    pass  # Script not available, Playwright should be pre-installed
+
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)   # ephemeral — sessions reset on restart (fine for local use)
 
