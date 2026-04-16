@@ -188,6 +188,23 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                     "--disable-pdf-extension",
                     "--disable-popup-blocking",
                     "--disable-blink-features=AutomationControlled",
+                    # Memory reduction — critical for containers with limited RAM
+                    "--disable-dev-shm-usage",   # use /tmp not /dev/shm (prevents crashes in Docker)
+                    "--no-sandbox",               # required when running as root in containers
+                    "--disable-setuid-sandbox",
+                    "--disable-gpu",              # no GPU in headless containers
+                    "--disable-software-rasterizer",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--disable-sync",
+                    "--disable-default-apps",
+                    "--mute-audio",
+                    "--disable-translate",
+                    "--disable-domain-reliability",
+                    "--disable-hang-monitor",
+                    "--safebrowsing-disable-auto-update",
+                    "--disable-features=TranslateUI",
+                    "--js-flags=--max-old-space-size=128",  # cap V8 heap at 128MB
                 ]
             )
             logger.info("[Browser] ✓ Chromium launched with persistent context")
