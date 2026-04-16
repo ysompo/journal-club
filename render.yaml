@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: journal-club
+    runtime: python-3.14
+    buildCommand: pip install -r requirements.txt && playwright install
+    startCommand: gunicorn wsgi:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SCRIPT_NAME
+        value: /tools/journal-club
