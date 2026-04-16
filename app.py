@@ -490,7 +490,7 @@ def report_download_error(article_id: int):
     try:
         runtime_cfg = get_runtime_config()
         from journal_club.mailer import send_error_report
-        send_error_report(report, runtime_cfg.resend_api_key)
+        send_error_report(report, runtime_cfg.resend_api_key, runtime_cfg.resend_from)
         app.logger.info(f"[ErrorReport] Sent for article_id={article_id}")
         return jsonify({"success": True})
     except Exception as e:

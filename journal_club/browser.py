@@ -177,12 +177,12 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
 
     try:
         with sync_playwright() as p:
-            # Use Playwright's bundled Chromium (no system dependency needed)
+            # Use Playwright's bundled Chromium with persistent context
             logger.info("[Browser] Launching Playwright's bundled Chromium")
-            browser: Browser = p.chromium.launch(
+            context: BrowserContext = p.chromium.launch_persistent_context(
+                user_data_dir=temp_profile,
                 headless=False,  # visible window helps with debugging
                 args=[
-                    f"--user-data-dir={temp_profile}",
                     "--no-first-run",
                     "--no-default-browser-check",
                     "--disable-pdf-extension",
@@ -190,9 +190,12 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                     "--disable-blink-features=AutomationControlled",
                 ]
             )
-            logger.info("[Browser] ✓ Chromium launched")
+            logger.info("[Browser] ✓ Chromium launched with persistent context")
 
-            context: BrowserContext = browser.new_context()
+            # Get the browser from the context
+            browser = context.browser
+            if not browser:
+                raise RuntimeError("Browser context created but browser not accessible")
 
             # Minimal stealth — only patch navigator.webdriver
             context.add_init_script(

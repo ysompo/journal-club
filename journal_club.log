@@ -9417,3 +9417,80 @@ task: <Task pending name='Task-69' coro=<Browser.close() running at C:\Users\yso
 2026-04-16 15:12:53 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:53] "GET /download/status/55 HTTP/1.1" 200 -
 2026-04-16 15:12:56 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:56] "GET /download/status/55 HTTP/1.1" 200 -
 2026-04-16 15:12:59 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:59] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:02 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:02] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:04 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 5.007 seconds
+2026-04-16 15:13:05 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:05] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:08 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:08] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:11 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:11] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:14 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:14] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:17 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:17] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:20 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:20] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:23 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:23] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:26 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:26] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:29 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:29] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:32 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:32] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:35 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:35] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:38 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:38] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:41 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:41] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:44 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:44] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:47 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:47] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:50 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:50] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:53 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:53] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:56 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:56] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:13:59 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:13:59] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:02 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:02] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:05 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:05] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:06 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 2.005 seconds
+2026-04-16 15:14:08 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:08] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:09 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 3.003 seconds
+2026-04-16 15:14:11 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:11] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:14 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:14] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:14 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 3.002 seconds
+2026-04-16 15:14:15 [    INFO] journal_club.pdf_capture: [Download event] Acta Obstet Gynecol Scand - 2026 - Coelingh Bennink - A concept for a new approach to combined oral contraception from.pdf
+2026-04-16 15:14:15 [   ERROR] asyncio: Task was destroyed but it is pending!
+source_traceback: Object created at (most recent call last):
+  File "C:\Python314\Lib\threading.py", line 1043, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1081, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1023, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\ysomp\OneDrive\Documents\Journal Club\journal_club\pdf_capture.py", line 70, in _capture_in_thread
+    file_path = dl.path()
+  File "C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\sync_api\_generated.py", line 7363, in path
+    return mapping.from_maybe_impl(self._sync(self._impl_obj.path()))
+  File "C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py", line 107, in _sync
+    task: asyncio.tasks.Task[Any] = self._loop.create_task(coro)
+  File "C:\Python314\Lib\asyncio\base_events.py", line 470, in create_task
+    task = tasks.Task(coro, loop=self, **kwargs)
+task: <Task pending name='Task-66' coro=<Download.path() running at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_download.py:57> created at C:\Python314\Lib\asyncio\base_events.py:470>
+2026-04-16 15:14:15 [   ERROR] journal_club.pdf_capture: [PDF download save error] Non-thread-safe operation invoked on an event loop other than the current one
+2026-04-16 15:14:15 [   ERROR] asyncio: Task was destroyed but it is pending!
+source_traceback: Object created at (most recent call last):
+  File "C:\Python314\Lib\threading.py", line 1043, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Python314\Lib\threading.py", line 1081, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Python314\Lib\threading.py", line 1023, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\ysomp\OneDrive\Documents\Journal Club\journal_club\pdf_capture.py", line 87, in _capture_in_thread
+    dl.save_as(tmp)
+  File "C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\sync_api\_generated.py", line 7383, in save_as
+    return mapping.from_maybe_impl(self._sync(self._impl_obj.save_as(path=path)))
+  File "C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py", line 107, in _sync
+    task: asyncio.tasks.Task[Any] = self._loop.create_task(coro)
+  File "C:\Python314\Lib\asyncio\base_events.py", line 470, in create_task
+    task = tasks.Task(coro, loop=self, **kwargs)
+task: <Task pending name='Task-68' coro=<Download.save_as() running at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_download.py:60> created at C:\Python314\Lib\asyncio\base_events.py:470>
+2026-04-16 15:14:15 [ WARNING] journal_club.pdf_capture: [PDF body() failed] Error: Response.body: Protocol error (Network.getResponseBody): No resource with given identifier found — https://obgyn.onlinelibrary.wiley.com/doi/pdfdirect/10.1111/
+2026-04-16 15:14:16 [    INFO] journal_club.pdf_capture: [PDF wait] ✓ Found on disk: 593,775 bytes from Acta Obstet Gynecol Scand - 2026 - Coelingh Bennink - A concept for a new approach to combined oral contraception from.pdf
+2026-04-16 15:14:16 [    INFO] journal_club.pdf_capture: [PDF wait] ✓ PDF captured!
+2026-04-16 15:14:17 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:17] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:20 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:20] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:21 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 5.011 seconds
+2026-04-16 15:14:21 [    INFO] asyncio: <_WindowsSubprocessTransport pid=13332 running stdin=<_ProactorWritePipeTransport closed> stdout=<_ProactorReadPipeTransport closed>> exited with return code 0
+2026-04-16 15:14:21 [    INFO] journal_club.pdf_capture: [PDF save] ✓ Saved C:\Users\ysomp\OneDrive\Documents\Journal Club\downloads\onlinelibrary_wiley_com_doi_10_1111_aogs_70182.pdf (593,775 bytes)
+2026-04-16 15:14:21 [    INFO] app: [Download] Success article_id=55 pdf=C:\Users\ysomp\OneDrive\Documents\Journal Club\downloads\onlinelibrary_wiley_com_doi_10_1111_aogs_70182.pdf
+2026-04-16 15:14:23 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:23] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:14:25 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:25] "GET /journals HTTP/1.1" 200 -
+2026-04-16 15:14:25 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:14:25] "GET /download/active HTTP/1.1" 200 -

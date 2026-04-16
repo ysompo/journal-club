@@ -121,9 +121,17 @@ def send_reading_list(
     return attached
 
 
-def send_error_report(report: dict, api_key: str, to_addr: str = "ysompo@gmail.com") -> bool:
+def send_error_report(report: dict, api_key: str, from_addr: str = "", to_addr: str = "ysompo@gmail.com") -> bool:
     """Send detailed error report for a failed download."""
     import resend
+
+    if not api_key:
+        print("[ErrorReport] No API key provided — skipping email")
+        return False
+
+    if not from_addr:
+        print("[ErrorReport] No from address provided — skipping email")
+        return False
 
     resend.api_key = api_key
 
@@ -170,7 +178,7 @@ def send_error_report(report: dict, api_key: str, to_addr: str = "ysompo@gmail.c
     try:
         resend.Emails.send(
             {
-                "from": "Journal Club <noreply@journal-club.local>",
+                "from": from_addr,
                 "to": to_addr,
                 "subject": f"[Journal Club] Download Error: {report.get('title', 'Unknown')[:50]}",
                 "html": html,
