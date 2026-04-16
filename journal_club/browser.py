@@ -19,12 +19,16 @@ CHROME_PATHS = [
 ]
 
 def find_chrome(override: str = "") -> str:
+    """
+    Try to find system Chrome. If not found, Playwright's bundled Chromium will be used instead.
+    This function is kept for backwards compatibility but failures are non-fatal.
+    """
     if override and os.path.exists(override):
         return override
     for path in CHROME_PATHS:
         if os.path.exists(path):
             return path
-    raise FileNotFoundError("Google Chrome not found. Install Chrome or set chrome_path in config.yaml")
+    return None  # Return None instead of raising — Playwright will use bundled Chromium
 
 
 def _ensure_pdf_download_preference(profile_dir: str) -> None:
@@ -149,75 +153,46 @@ def _find_free_port() -> int:
 def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                    start_url: str = "about:blank"):
     """
-    Launch Chrome as a normal process (no Playwright flags) and connect via CDP.
+    Launch Playwright's bundled Chromium browser.
 
-    Uses a fresh temporary profile for each session so that stale lock files,
-    permission issues, and multi-instance conflicts from previous downloads
-    cannot interfere.  The persistent profile_dir is only used to kill any
-    surviving Chrome processes before we start.
+    Uses a fresh temporary profile for each session to avoid lock files and permission issues.
+    No system Chrome dependency — works on local machines, Render, Docker, and containers.
 
     Yields (playwright, browser, context, page). Cleans up on exit.
     """
     import shutil
     import tempfile
 
-    # Kill any stale Chrome processes that are still holding the persistent profile.
-    os.makedirs(profile_dir, exist_ok=True)
-    _cleanup_chromium_locks(profile_dir)
+    # Kill any stale processes (best effort)
+    if profile_dir:
+        try:
+            os.makedirs(profile_dir, exist_ok=True)
+            _cleanup_chromium_locks(profile_dir)
+        except Exception:
+            pass  # non-fatal
 
-    # Create a throw-away profile dir for this session.
-    # This avoids ALL lock/permission conflicts with surviving Chrome processes.
+    # Create a temporary profile for this session
     temp_profile = tempfile.mkdtemp(prefix="jc-chrome-")
     logger.info(f"[Browser] Using temp profile: {temp_profile}")
 
-    _ensure_pdf_download_preference(temp_profile)
-
-    _exe = find_chrome(chrome_path)
-    logger.info(f"[Browser] Using installed Chrome: {_exe}")
-
-    debug_port = port or _find_free_port()
-    logger.info(f"[Browser] Debug port: {debug_port}")
-
-    chrome_args = [
-        _exe,
-        f"--remote-debugging-port={debug_port}",
-        f"--user-data-dir={temp_profile}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-pdf-extension",
-        "--disable-popup-blocking",   # allow window.open from JS (no user-gesture requirement)
-        "--disable-blink-features=AutomationControlled",
-        start_url,
-    ]
-
-    chrome_proc = subprocess.Popen(
-        chrome_args,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    logger.info(f"[Browser] Chrome launched (pid={chrome_proc.pid})")
-
-    # Wait for Chrome's debug port to become available
-    cdp_url = f"http://127.0.0.1:{debug_port}"
-    for i in range(30):
-        try:
-            with socket.create_connection(("127.0.0.1", debug_port), timeout=1):
-                break
-        except (ConnectionRefusedError, OSError):
-            time.sleep(0.5)
-    else:
-        chrome_proc.kill()
-        shutil.rmtree(temp_profile, ignore_errors=True)
-        raise RuntimeError(f"Chrome debug port {debug_port} did not open after 15s")
-
-    logger.info("[Browser] Chrome debug port ready")
-
     try:
         with sync_playwright() as p:
-            browser: Browser = p.chromium.connect_over_cdp(cdp_url)
-            logger.info("[Browser] ✓ Connected via CDP")
+            # Use Playwright's bundled Chromium (no system dependency needed)
+            logger.info("[Browser] Launching Playwright's bundled Chromium")
+            browser: Browser = p.chromium.launch(
+                headless=False,  # visible window helps with debugging
+                args=[
+                    f"--user-data-dir={temp_profile}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-pdf-extension",
+                    "--disable-popup-blocking",
+                    "--disable-blink-features=AutomationControlled",
+                ]
+            )
+            logger.info("[Browser] ✓ Chromium launched")
 
-            context: BrowserContext = browser.contexts[0]
+            context: BrowserContext = browser.new_context()
 
             # Minimal stealth — only patch navigator.webdriver
             context.add_init_script(
@@ -225,10 +200,10 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
             )
             logger.info("[Browser] ✓ Stealth script injected")
 
-            if context.pages:
-                page = context.pages[0]
-            else:
-                page = context.new_page()
+            page: Page = context.new_page()
+            if start_url != "about:blank":
+                page.goto(start_url, wait_until="domcontentloaded")
+            logger.info("[Browser] ✓ Page created")
 
             try:
                 yield p, browser, context, page
@@ -240,24 +215,18 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                     page.close()
                 except Exception:
                     pass
-                # Use a timeout to prevent browser.close() from hanging if Playwright is broken
-                import concurrent.futures as _futures
                 try:
-                    with _futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(browser.close)
-                        future.result(timeout=5)
-                except _futures.TimeoutError:
-                    logger.warning("[Browser] browser.close() timeout (5s) — Playwright may be hung")
+                    context.close()
                 except Exception:
                     pass
-    finally:
-
-        try:
-            chrome_proc.terminate()
-            chrome_proc.wait(timeout=10)
-            logger.debug("[Browser] Chrome process terminated")
-        except Exception:
-            chrome_proc.kill()
-            logger.warning("[Browser] Chrome process killed")
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                shutil.rmtree(temp_profile, ignore_errors=True)
+                logger.info("[Browser] Closed and cleaned up temp profile")
+    except Exception as e:
+        logger.error(f"[Browser] Error launching Chromium: {e}")
         shutil.rmtree(temp_profile, ignore_errors=True)
+        raise
         logger.debug(f"[Browser] Temp profile removed")

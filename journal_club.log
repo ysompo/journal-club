@@ -9329,3 +9329,91 @@ task: <Task pending name='Task-69' coro=<Browser.close() running at C:\Users\yso
 2026-04-16 14:06:35 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 14:06:35] "GET /download/status/54 HTTP/1.1" 200 -
 2026-04-16 14:06:37 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 14:06:37] "GET /download/status/54 HTTP/1.1" 200 -
 2026-04-16 14:06:40 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 14:06:40] "GET /download/status/54 HTTP/1.1" 200 -
+2026-04-16 15:10:00 [    INFO] app: Journal Club started (debug=False, log_level=INFO)
+2026-04-16 15:10:00 [    INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-16 15:10:00 [    INFO] apscheduler.scheduler: Added job "_refresh_all_journals" to job store "default"
+2026-04-16 15:10:00 [    INFO] apscheduler.scheduler: Scheduler started
+2026-04-16 15:10:00 [    INFO] werkzeug: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2026-04-16 15:10:00 [    INFO] werkzeug: [33mPress CTRL+C to quit[0m
+2026-04-16 15:10:03 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:03] "[32mGET / HTTP/1.1[0m" 302 -
+2026-04-16 15:10:03 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:03] "GET /journals HTTP/1.1" 200 -
+2026-04-16 15:10:03 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:03] "GET /download/active HTTP/1.1" 200 -
+2026-04-16 15:10:04 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:04] "POST /reading-list/add HTTP/1.1" 200 -
+2026-04-16 15:10:06 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:06] "[31m[1mPOST /reading-list/email HTTP/1.1[0m" 400 -
+2026-04-16 15:10:11 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:11] "POST /download HTTP/1.1" 200 -
+2026-04-16 15:10:12 [    INFO] app: [Download] Starting download for article_id=55 url=https://onlinelibrary.wiley.com/doi/10.1111/aogs.70182
+2026-04-16 15:10:13 [    INFO] journal_club.browser: [Browser] Killed any stale Chrome process trees for 'journal-club-chrome-profile'
+2026-04-16 15:10:13 [ WARNING] journal_club.browser: [Browser] Could not remove lock file C:\Users\ysomp\AppData\Local\journal-club-chrome-profile\Default\LOCK: [WinError 5] Access is denied: 'C:\\Users\\ysomp\\AppData\\Local\\journal-club-chrome-profile\\Default\\LOCK'
+2026-04-16 15:10:13 [    INFO] journal_club.browser: [Browser] Using temp profile: C:\Users\ysomp\AppData\Local\Temp\jc-chrome-ltimjsbh
+2026-04-16 15:10:13 [    INFO] journal_club.browser: [Browser] Using installed Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+2026-04-16 15:10:13 [    INFO] journal_club.browser: [Browser] Debug port: 58367
+2026-04-16 15:10:13 [    INFO] journal_club.browser: [Browser] Chrome launched (pid=13608)
+2026-04-16 15:10:14 [    INFO] journal_club.browser: [Browser] Chrome debug port ready
+2026-04-16 15:10:14 [    INFO] asyncio: execute program 'C:\\Users\\ysomp\\AppData\\Roaming\\Python\\Python314\\site-packages\\playwright\\driver\\node.exe': <_WindowsSubprocessTransport pid=13332 running stdin=<_ProactorWritePipeTransport fd=1076 read=<_OverlappedFuture pending cb=[_ProactorWritePipeTransport._pipe_closed()] created at C:\Python314\Lib\asyncio\windows_events.py:494>> stdout=<_ProactorReadPipeTransport fd=1080 read=<_OverlappedFuture pending cb=[_ProactorReadPipeTransport._loop_reading()] created at C:\Python314\Lib\asyncio\windows_events.py:507>>>
+2026-04-16 15:10:14 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:14] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:15 [    INFO] journal_club.browser: [Browser] ✓ Connected via CDP
+2026-04-16 15:10:15 [    INFO] journal_club.browser: [Browser] ✓ Stealth script injected
+2026-04-16 15:10:17 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:17] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:20 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:20] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:23 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 3.005 seconds
+2026-04-16 15:10:23 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:23] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:26 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:26] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:29 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:29] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:32 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:32] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:35 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:35] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:38 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:38] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:41 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:41] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:44 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:44] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:47 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:47] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:50 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:50] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:53 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:53] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:56 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:56] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:10:59 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:10:59] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:02 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:02] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:05 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:05] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:06 [   ERROR] journal_club.pdf_capture: [PDF wait] ✗ Timeout after 20s — PDF not captured
+2026-04-16 15:11:06 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 20.011 seconds
+2026-04-16 15:11:07 [ WARNING] journal_club.pdf_capture: [PDF body() failed] Error: Response.body: Protocol error (Network.getResponseBody): No resource with given identifier found — https://obgyn.onlinelibrary.wiley.com/doi/pdfdirect/10.1111/
+2026-04-16 15:11:08 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:08] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:10 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 3.009 seconds
+2026-04-16 15:11:11 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:11] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:14 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:14] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:17 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:17] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:20 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:20] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:23 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:23] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:26 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:26] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:29 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:29] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:32 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:32] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:35 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:35] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:38 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:38] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:41 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:41] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:44 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:44] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:47 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:47] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:50 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:50] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:53 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:53] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:54 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 1.006 seconds
+2026-04-16 15:11:56 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:56] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:11:59 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:11:59] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:02 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:02] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:05 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:05] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:08 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:08] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:11 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:11] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:14 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:14] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:17 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:17] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:20 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:20] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:23 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:23] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:25 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 1.004 seconds
+2026-04-16 15:12:26 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:26] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:29 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:29] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:32 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:32] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:35 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:35] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:38 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:38] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:41 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:41] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:43 [ WARNING] asyncio: Executing <Handle SyncBase._sync.<locals>.<lambda>(<Task finishe...c_base.py:107>) at C:\Users\ysomp\AppData\Roaming\Python\Python314\site-packages\playwright\_impl\_sync_base.py:111 created at C:\Python314\Lib\asyncio\events.py:94> took 3.003 seconds
+2026-04-16 15:12:44 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:44] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:47 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:47] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:50 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:50] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:53 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:53] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:56 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:56] "GET /download/status/55 HTTP/1.1" 200 -
+2026-04-16 15:12:59 [    INFO] werkzeug: 127.0.0.1 - - [16/Apr/2026 15:12:59] "GET /download/status/55 HTTP/1.1" 200 -
