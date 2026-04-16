@@ -105,7 +105,7 @@
     document.getElementById('resolving-sub').textContent = val.slice(0, 60);
 
     try {
-      const res  = await fetch('/download', {
+      const res  = await fetch(APP_BASE + '/download', {
         method:  'POST',
         headers: {'Content-Type': 'application/json'},
         body:    JSON.stringify({input: val}),
@@ -118,7 +118,7 @@
       } else {
         document.getElementById('done-title').textContent =
           (data.title || data.url).slice(0, 80);
-        document.getElementById('done-link').href = '/article/' + data.article_id;
+        document.getElementById('done-link').href = APP_BASE + '/article/' + data.article_id;
         showState('state-done');
         inputEl.value = '';
       }

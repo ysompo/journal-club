@@ -163,7 +163,7 @@
             {% set dl_article_id = downloaded_article_map.get(a.id) %}
             {% if dl_article_id %}
             <!-- Already downloaded — link directly to PDF -->
-            <a href="/pdf/{{ dl_article_id }}" target="_blank"
+            <a href="{{ url_for('pdf', article_id=dl_article_id) }}" target="_blank"
                onclick="event.stopPropagation()"
                class="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors">
               <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
@@ -193,7 +193,7 @@
               Article page
             </a>
             {% if downloaded_article_map.get(a.id) %}
-            <a href="/pdf/{{ downloaded_article_map.get(a.id) }}" target="_blank"
+            <a href="{{ url_for('pdf', article_id=downloaded_article_map.get(a.id)) }}" target="_blank"
                class="inline-flex items-center gap-1 text-xs text-green-700 font-semibold hover:underline">
               <span class="material-symbols-outlined text-sm">picture_as_pdf</span>
               View PDF
@@ -463,7 +463,7 @@ function refreshJournal(id) {
 // ── Toggle reading list ───────────────────────────────────────────────────────
 function toggleReadingList(tocArticleId, btn) {
   const inRL = btn.dataset.inRl === 'true';
-  const url = inRL ? '/reading-list/remove' : '/reading-list/add';
+  const url = inRL ? APP_BASE + '/reading-list/remove' : APP_BASE + '/reading-list/add';
   fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},

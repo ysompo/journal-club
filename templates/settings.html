@@ -53,7 +53,7 @@ function saveSettings() {
   const keys = ['email_to_1','email_to_2','email_to_3'];
   const data = {};
   keys.forEach(k => { const el = document.getElementById(k); if (el) data[k] = el.value; });
-  fetch('/settings', {
+  fetch(APP_BASE + '/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(data),

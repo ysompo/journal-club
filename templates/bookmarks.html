@@ -23,7 +23,7 @@
             {% if a.doi %} &middot; {{ a.doi }}{% endif %}
           </p>
 
-          <a href="/article/{{ a.id }}"
+          <a href="{{ url_for('article', article_id=a.id) }}"
              class="font-headline text-lg text-on-surface group-hover:text-primary transition-colors line-clamp-2 block mb-2">
             {{ a.title or a.url }}
           </a>
@@ -66,7 +66,7 @@
     <p class="text-on-surface-variant text-sm">
       Click the bookmark icon on any article in your history to save it here.
     </p>
-    <a href="/history" class="mt-6 text-sm font-semibold text-primary hover:underline flex items-center gap-1">
+    <a href="{{ url_for('history') }}" class="mt-6 text-sm font-semibold text-primary hover:underline flex items-center gap-1">
       <span class="material-symbols-outlined text-sm">arrow_back</span> Go to History
     </a>
   </div>
@@ -78,7 +78,7 @@
   document.querySelectorAll('.bookmark-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
-      await fetch('/bookmark/' + id, {method: 'POST'});
+      await fetch(APP_BASE + '/bookmark/' + id, {method: 'POST'});
       // Remove the card from the bookmarks list immediately
       btn.closest('.group').style.opacity = '0';
       setTimeout(() => btn.closest('.group').remove(), 300);

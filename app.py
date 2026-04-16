@@ -39,6 +39,7 @@ import os
 script_name = os.environ.get("SCRIPT_NAME", "")
 if script_name:
     app.config["APPLICATION_ROOT"] = script_name
+    app.config["SESSION_COOKIE_PATH"] = script_name
 
 cfg = load_config("config.yaml")
 

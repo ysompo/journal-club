@@ -25,7 +25,7 @@
           </p>
 
           <!-- Title -->
-          <a href="/article/{{ a.id }}"
+          <a href="{{ url_for('article', article_id=a.id) }}"
              class="font-headline text-lg text-on-surface group-hover:text-primary transition-colors line-clamp-2 block mb-2">
             {{ a.title or a.url }}
           </a>
@@ -40,7 +40,7 @@
           <!-- Action row -->
           <div class="flex items-center gap-4 mt-1 flex-wrap">
             {% if a.pdf_path %}
-            <a href="/pdf/{{ a.id }}" target="_blank"
+            <a href="{{ url_for('serve_pdf', article_id=a.id) }}" target="_blank"
                class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded bg-primary text-white hover:bg-primary-container transition-colors">
               <span class="material-symbols-outlined text-sm">picture_as_pdf</span> View PDF
             </a>
@@ -85,7 +85,7 @@
   document.querySelectorAll('.bookmark-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
-      const res = await fetch('/bookmark/' + id, {method: 'POST'});
+      const res = await fetch(APP_BASE + '/bookmark/' + id, {method: 'POST'});
       const data = await res.json();
       btn.dataset.bookmarked = data.bookmarked ? 'true' : 'false';
       if (data.bookmarked) {

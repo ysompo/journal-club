@@ -37,6 +37,10 @@
       }
     }
   </script>
+  <script>
+    // Base path for absolute API calls — set from Flask's SCRIPT_NAME (e.g. /tools/journal-club)
+    const APP_BASE = {{ request.script_root | tojson }};
+  </script>
   <style>
     .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
     .fill-icon { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
@@ -95,25 +99,25 @@
 
     <!-- Nav -->
     <nav class="space-y-1 flex-1">
-      <a href="."
+      <a href="{{ url_for('add') }}"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'add' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
         <span class="material-symbols-outlined {% if page == 'add' %}fill-icon{% endif %}">add_circle</span>
         <span>Add Article</span>
       </a>
-      <a href="./journals"
+      <a href="{{ url_for('journals') }}"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'journals' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
         <span class="material-symbols-outlined {% if page == 'journals' %}fill-icon{% endif %}">library_books</span>
         <span>Journals</span>
       </a>
-      <a href="./history"
+      <a href="{{ url_for('history') }}"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'history' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
         <span class="material-symbols-outlined {% if page == 'history' %}fill-icon{% endif %}">history</span>
         <span>History</span>
       </a>
-      <a href="./bookmarks"
+      <a href="{{ url_for('bookmarks') }}"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'bookmarks' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
         <span class="material-symbols-outlined {% if page == 'bookmarks' %}fill-icon{% endif %}">bookmark</span>
@@ -157,7 +161,7 @@
       </div>
 
       <!-- Settings link -->
-      <a href="./settings"
+      <a href="{{ url_for('settings') }}"
          class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
                 {% if page == 'settings' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
         <span class="material-symbols-outlined {% if page == 'settings' %}fill-icon{% endif %}">settings</span>
@@ -165,7 +169,7 @@
       </a>
 
       <!-- Logout button -->
-      <form method="POST" action="./logout" class="mt-auto">
+      <form method="POST" action="/api/auth/logout" class="mt-auto">
         <button type="submit"
           class="w-full flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors text-slate-500 hover:bg-slate-100">
           <span class="material-symbols-outlined">logout</span>
