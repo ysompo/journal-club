@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 import functools
 import secrets
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_file, send_from_directory
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from journal_club.config import Config, load_config
@@ -833,6 +833,31 @@ def admin_settings_save():
         if key in data:
             storage.set_setting(key, data[key])
     return jsonify({"status": "saved"})
+
+
+# ── Debug screenshots (admin-only) ───────────────────────────────────────────
+
+@app.route("/admin/debug-screenshots")
+@require_admin
+def debug_screenshots():
+    import glob
+    files = sorted(glob.glob("debug_*.png"), reverse=True)
+    links = "".join(
+        f'<li><a href="{url_for("debug_screenshot_file", filename=f)}">{f}</a></li>'
+        for f in files
+    )
+    return f"<ul>{links}</ul>" if links else "No debug screenshots found."
+
+
+@app.route("/admin/debug-screenshots/<path:filename>")
+@require_admin
+def debug_screenshot_file(filename):
+    import glob, os
+    # Safety: only serve files matching debug_*.png in the working directory
+    allowed = set(os.path.basename(f) for f in glob.glob("debug_*.png"))
+    if os.path.basename(filename) not in allowed:
+        return "Not found", 404
+    return send_from_directory(".", filename, mimetype="image/png")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
