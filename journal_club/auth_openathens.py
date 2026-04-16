@@ -71,6 +71,9 @@ def _click_access_through_institution(page: Page) -> None:
 
 def _select_huji_on_wayfinder(page: Page) -> None:
     """Type HUJI into the institution search box and click the result."""
+    import sys
+    print(f"   [OA] _select_huji_on_wayfinder starting (URL: {page.url[:60]})")
+    sys.stdout.flush()
     dismiss_cookies(page)
     time.sleep(1)
 
@@ -296,7 +299,10 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
     Returns the PDF URL that was navigated to (or None), so download.py can use
     it as a fallback if the captured list is still empty after the browser closes.
     """
+    import sys
     print(f"\n[OA Generic Auth] Article: {article_url[:60]}")
+    print(f"[OA] Running on: {sys.platform} (headless: {page.context.browser.name})")
+    sys.stdout.flush()
 
     # If the Chrome extension already captured the PDF (cached session), skip auth entirely
     if captured:
@@ -307,7 +313,10 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
     if sso_url:
         # Navigate directly to the publisher's ssostart page
         print(f"   [OA] SSO URL: {sso_url[:100]}")
-        page.goto(sso_url, wait_until="domcontentloaded")
+        try:
+            page.goto(sso_url, wait_until="domcontentloaded", timeout=30_000)
+        except Exception as e:
+            print(f"   [OA] SSO navigation error (continuing): {e}")
         time.sleep(3)
         dismiss_cookies(page)
 
@@ -339,15 +348,26 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
         time.sleep(1)
 
         # Institution search is on the ssostart page itself for Atypon
+        print("   [OA] Selecting HUJI on ssostart page...")
         _select_huji_on_wayfinder(page)
+        print(f"   [OA] After HUJI selection: {page.url[:80]}")
         time.sleep(3)
     else:
         # Generic: navigate to article and click through to institution login
-        page.goto(article_url, wait_until="domcontentloaded")
+        try:
+            print("   [OA] Navigating to article...")
+            page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
+            print(f"   [OA] Article loaded: {page.url[:80]}")
+        except Exception as e:
+            print(f"   [OA] Article navigation error (continuing): {e}")
         time.sleep(2)
         dismiss_cookies(page)
+        print("   [OA] Clicking institution login button...")
         _click_access_through_institution(page)
+        print(f"   [OA] After institution click: {page.url[:80]}")
 
+    import sys
+    sys.stdout.flush()
     print(f"   [OA] After selection: {page.url[:80]}")
 
     # Wait for an auth redirect: huji.ac.il (HUJI IdP), openathens/wayfinder (IdP chooser).
