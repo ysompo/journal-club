@@ -35,6 +35,13 @@ if script_name:
 
 cfg = load_config("config.yaml")
 
+# Ensure output directory exists
+if cfg.output_dir:
+    try:
+        os.makedirs(cfg.output_dir, exist_ok=True)
+    except Exception as e:
+        pass  # log warning below after logging is configured
+
 # Configure logging: set DEBUG=1 env var for verbose debugging
 debug_mode = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 log_level = logging.DEBUG if debug_mode else logging.INFO
@@ -42,6 +49,16 @@ log_file = "journal_club.log" if not app.debug else None  # log to file in produ
 
 configure_logging(log_level=log_level, log_file=log_file)
 app.logger.info(f"Journal Club started (debug={debug_mode}, log_level={logging.getLevelName(log_level)})")
+
+# Log output directory
+if cfg.output_dir:
+    try:
+        if os.path.isdir(cfg.output_dir):
+            app.logger.info(f"Output directory: {cfg.output_dir}")
+        else:
+            app.logger.error(f"Output directory not accessible: {cfg.output_dir}")
+    except Exception as e:
+        app.logger.error(f"Error checking output directory: {e}")
 
 
 def require_admin(f):

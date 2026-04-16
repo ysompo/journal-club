@@ -130,4 +130,6 @@ def wait_for_huji_and_login(page: Page, email: str, password: str,
         login_huji(page, email, password)
     except Exception as e:
         print(f"   [HUJI] Did not reach HUJI login: {e}")
-        time.sleep(20)
+        # Don't sleep 20s here — if we're already authenticated via cookies the
+        # HUJI page never appears and we'd waste 20 seconds on every download.
+        time.sleep(2)

@@ -119,6 +119,10 @@ def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
             volume = doc.get("volume", "")
             issue = doc.get("issue", "")
 
+            # Skip ahead-of-print articles — no volume means not yet assigned to an issue
+            if not volume:
+                continue
+
             # Build issue label from the first article
             if not issue_label and (volume or issue):
                 parts = []
@@ -200,103 +204,94 @@ def _enrich_abstracts(articles: list[dict], issn: str) -> None:
         print(f"   [TOC] Abstract enrichment error: {e}")
 
 
+_AJOG_SKIP_SECTIONS = re.compile(
+    r"letters?\s+(to\s+the\s+)?editors?|correspondence|errata?|correction",
+    re.IGNORECASE,
+)
+
+_AJOG_SECTION_TYPES: dict[str, str] = {
+    "expert review": "Expert Review",
+    "systematic review": "Systematic Review",
+    "clinical opinion": "Clinical Opinion",
+    "original research": "Original Research",
+    "surgeon": "Surgeon's Corner",
+    "research letter": "Research Letter",
+}
+
+
 def scrape_ajog_html(html_content: str) -> TocResult:
     """
     Scrape AJOG article list directly from the HTML page.
-    Extracts articles from the current issue, excluding replies/letters and in-press items.
+
+    Iterates over section.toc__section elements and extracts div.toc__item
+    article entries, skipping letters/correspondence sections and items that
+    lack an article link.  The /current page shows only current-issue articles,
+    so no publication-date filtering is needed.
     """
     try:
         soup = BeautifulSoup(html_content, "html.parser")
-        articles = []
 
-        # Extract issue label from page (e.g., "April 2026 - Volume 234, Issue 4")
+        # Build issue label from volume/issue numbers embedded in the page
         issue_label = "AJOG Current Issue"
-        volume_match = re.search(r'Volume\s+(\d+).*?Issue\s+(\d+)', html_content)
+        volume_match = re.search(r'Volume\s+(\d+)[,\s]+Issue\s+(\d+)', html_content, re.IGNORECASE)
         if volume_match:
             issue_label = f"Vol {volume_match.group(1)} Issue {volume_match.group(2)}"
 
-        # Find article links in the page
-        # AJOG uses /article/Sxxxxxx-xxxxx format for article links
-        article_links = soup.find_all("a", href=re.compile(r'/article/S\d+'))
+        articles: list[dict] = []
+        seen_titles: set[str] = set()
 
-        found_articles = set()  # Deduplicate by title
-        article_type_map = {
-            "expert review": "Expert Review",
-            "systematic review": "Systematic Review",
-            "clinical opinion": "Clinical Opinion",
-            "surgeon": "Surgeon's Corner",
-            "original research": "Original Research",
-            "gynecology": "Original Research",
-            "obstetrics": "Original Research",
-        }
+        for section in soup.find_all("section", class_="toc__section"):
+            heading = section.find(class_="toc__heading__header")
+            section_name = heading.get_text(strip=True) if heading else ""
 
-        for link in article_links:
-            title = link.get_text(strip=True).strip()
-
-            # Skip empty titles and navigation links
-            if not title or len(title) < 10:
+            # Skip sections with no heading (front matter) and letters/correspondence
+            if not section_name or _AJOG_SKIP_SECTIONS.search(section_name):
                 continue
 
-            # **FILTER**: Skip replies, letters, and corrections that are part of larger articles
-            # These are in-press or previously published replies, not actual TOC articles
-            skip_patterns = [
-                r"reply\s+to\s+letter",  # Reply to Letter-to-the-Editor
-                r"response\s+to",         # Responses to other articles
-                r"correction\s+to",       # Corrections
-                r"reply:",                # Simple replies
-                r"in\s+press",           # In-press indicators
-                r"accepted",              # Not yet published
-                r"ahead\s+of\s+print",   # Not in final issue
-            ]
-
-            if any(re.search(pattern, title, re.IGNORECASE) for pattern in skip_patterns):
-                continue
-
-            if title in found_articles:
-                continue
-
-            found_articles.add(title)
-
-            # Get article URL
-            url = link.get("href", "")
-            if url.startswith("/"):
-                url = "https://www.ajog.org" + url
-
-            # Determine article type
+            # Map section heading to article type
             article_type = "Journal Article"
-            title_lower = title.lower()
-            for key, atype in article_type_map.items():
-                if key in title_lower:
+            section_lower = section_name.lower()
+            for key, atype in _AJOG_SECTION_TYPES.items():
+                if key in section_lower:
                     article_type = atype
                     break
 
-            # Extract authors from parent element
-            authors = []
-            parent = link.find_parent(["li", "div", "section"])
-            if parent:
-                parent_text = parent.get_text(strip=True)
-                # Look for author patterns (names with capitals)
-                author_matches = re.findall(
-                    r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+(?:Jr|Sr|MD|PhD))?(?:,|;|$)',
-                    parent_text
-                )
-                authors = [a.strip().rstrip(',;') for a in author_matches if a.strip() and len(a.strip()) > 2][:5]
+            for item in section.find_all("div", class_="toc__item"):
+                link = item.find("a", href=re.compile(r"/article/S\d+"))
+                if not link:
+                    continue
 
-            article = {
-                "url": url,
-                "title": title,
-                "authors": authors,
-                "article_type": article_type,
-                "doi": None,
-                "abstract": "",
-            }
-            articles.append(article)
+                title = link.get_text(strip=True)
+                if not title or len(title) < 10:
+                    continue
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
 
-        if articles:
-            print(f"   [TOC] Found {len(articles)} articles from HTML")
-            return TocResult(issue_label=issue_label, articles=articles)
+                url = link.get("href", "")
+                if url.startswith("/"):
+                    url = "https://www.ajog.org" + url
 
-        return TocResult(issue_label=issue_label, articles=[])
+                doi_match = re.search(r"10\.\d{4}/\S+", url)
+                doi = doi_match.group(0) if doi_match else None
+
+                authors = [
+                    a.get_text(strip=True)
+                    for a in item.select("ul.toc__item__authors li, .toc__item__authors a")
+                    if a.get_text(strip=True)
+                ]
+
+                articles.append({
+                    "url": url,
+                    "title": title,
+                    "authors": authors,
+                    "article_type": article_type,
+                    "doi": doi,
+                    "abstract": "",
+                })
+
+        print(f"   [TOC] AJOG HTML: {len(articles)} articles scraped from current issue")
+        return TocResult(issue_label=issue_label, articles=articles)
 
     except Exception as e:
         print(f"   [TOC] AJOG HTML scraping error: {e}")
@@ -757,6 +752,10 @@ def _parse_elsevier(soup: BeautifulSoup, base_url: str) -> TocResult:
         doi_match = re.search(r"10\.\d{4,}/\S+", url)
         doi = doi_match.group(0) if doi_match else None
 
+        # Skip in-press / "available online" articles — they're not in the current issue yet
+        if _is_in_press(item.get_text(" ", strip=True), url):
+            continue
+
         authors = [a.get_text(strip=True) for a in item.select(".author-name, .contrib-group a")]
         atype_tag = item.select_one(".article-type, .content-type")
         article_type = atype_tag.get_text(strip=True) if atype_tag else ""
@@ -811,3 +810,20 @@ def _parse_generic(soup: BeautifulSoup, base_url: str, host: str | None = None) 
 def _clean_label(s: str) -> str:
     """Collapse whitespace."""
     return re.sub(r"\s+", " ", s).strip()
+
+
+_IN_PRESS_TEXT = re.compile(
+    r"\bavailable\s+online\b|\barticle\s+in\s+press\b|\bcorrected\s+proof\b|\buncorrected\s+proof\b",
+    re.IGNORECASE,
+)
+_IN_PRESS_URL = re.compile(r"/aip/|inpress", re.IGNORECASE)
+
+
+def _is_in_press(container_text: str, url: str) -> bool:
+    """Return True if the article is an in-press / ahead-of-print item.
+
+    Elsevier in-press articles say "Available online [date]" on the TOC page.
+    Published-in-issue articles say "Published online [date]" (already assigned
+    to a volume/issue).  In-press article URLs also contain /aip/.
+    """
+    return bool(_IN_PRESS_TEXT.search(container_text) or _IN_PRESS_URL.search(url))
