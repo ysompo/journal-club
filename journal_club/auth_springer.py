@@ -9,7 +9,7 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
     """SpringerNature subscription auth flow (used only if OA check failed)."""
     from urllib.parse import quote
     print(f"\n[Springer Auth] Article: {article_url[:60]}")
-    page.goto(article_url, wait_until="domcontentloaded")
+    page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
     dismiss_cookies(page)
 
@@ -27,14 +27,14 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
 
     if inst_url:
         print(f"   [Springer] Navigating to institution access: {inst_url[:80]}")
-        page.goto(inst_url, wait_until="domcontentloaded")
+        page.goto(inst_url, wait_until="domcontentloaded", timeout=30_000)
         time.sleep(3)
     else:
         # Fallback: build wayf URL from article URL
         encoded = quote(article_url, safe="")
         wayf_url = f"https://wayf.springernature.com/?redirect_uri={encoded}"
         print(f"   [Springer] No inst link found, navigating to wayf: {wayf_url[:80]}")
-        page.goto(wayf_url, wait_until="domcontentloaded")
+        page.goto(wayf_url, wait_until="domcontentloaded", timeout=30_000)
         time.sleep(3)
 
     print(f"   On: {page.url[:80]}")
@@ -104,7 +104,7 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
     except Exception:
         print(f"   Timeout. URL: {page.url}")
     time.sleep(3)
-    page.goto(article_url, wait_until="domcontentloaded")
+    page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
 
     # Extract direct PDF URL from authenticated DOM

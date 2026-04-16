@@ -63,7 +63,7 @@ def authenticate_jama(page: Page, article_url: str, email: str, password: str,
     """Full JAMA auth flow. Assumes PDF hooks already attached to page/context."""
     shib_url = _build_shibboleth_url(article_url)
     print(f"\n[JAMA Auth] Navigating to Shibboleth URL...")
-    page.goto(shib_url, wait_until="domcontentloaded")
+    page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(2)
     print(f"   On: {page.url[:80]}")
 
@@ -98,7 +98,7 @@ def authenticate_jama(page: Page, article_url: str, email: str, password: str,
 
     # Navigate to fulltext page and extract the PDF URL directly from DOM
     ft_url = article_url.replace("article-abstract", "fullarticle")
-    page.goto(ft_url, wait_until="domcontentloaded")
+    page.goto(ft_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
 
     # Extract the direct PDF URL from the authenticated fullarticle DOM

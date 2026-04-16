@@ -126,7 +126,10 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
                 except Exception as _e:
                     print(f"   Homepage warm-up error (continuing): {_e}")
 
-            page.goto(article_url, wait_until="domcontentloaded")
+            try:
+                page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
+            except Exception as e:
+                print(f"[Download] Article navigation error (continuing): {e}")
             time.sleep(3)
 
             oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)

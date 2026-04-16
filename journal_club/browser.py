@@ -205,7 +205,7 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
 
             page: Page = context.new_page()
             if start_url != "about:blank":
-                page.goto(start_url, wait_until="domcontentloaded")
+                page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
             logger.info("[Browser] ✓ Page created")
 
             try:

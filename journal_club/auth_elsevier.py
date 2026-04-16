@@ -67,7 +67,7 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
                            captured: list, output_dir: str = None):
     """Elsevier/ScienceDirect auth flow."""
     print(f"\n[Elsevier Auth] Article: {article_url[:60]}")
-    page.goto(article_url, wait_until="domcontentloaded")
+    page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     try:
         page.wait_for_load_state("networkidle", timeout=8000)
     except Exception:
@@ -319,7 +319,7 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
 
         # Navigate to article — guard against being interrupted by OAuth callback
         try:
-            page.goto(article_url, wait_until="domcontentloaded")
+            page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
             try:
                 page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:

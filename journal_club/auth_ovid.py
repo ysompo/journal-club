@@ -51,7 +51,7 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
     """Full LWW/Ovid auth flow."""
     ovid_url = _build_ovid_login_url(article_url)
     print(f"\n[Ovid Auth] Navigating to Ovid login: {ovid_url[:60]}")
-    page.goto(ovid_url, wait_until="domcontentloaded")
+    page.goto(ovid_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
     print(f"   On: {page.url[:80]}")
 
@@ -118,7 +118,7 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
     time.sleep(3)
     # Navigate to fulltext URL (not citation URL — citation page has no download button)
     ft_url = article_url.replace("/citation/", "/fulltext/")
-    page.goto(ft_url, wait_until="domcontentloaded")
+    page.goto(ft_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
 
     # Try to find a direct PDF URL in the DOM first
@@ -162,7 +162,8 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
                     except Exception:
                         continue
             download = dl_info.value
-            tmp = os.path.join(os.environ.get("TEMP", "C:\\Temp"), download.suggested_filename)
+            import tempfile
+            tmp = os.path.join(tempfile.gettempdir(), download.suggested_filename)
             download.save_as(tmp)
             with open(tmp, "rb") as fh:
                 body = fh.read()

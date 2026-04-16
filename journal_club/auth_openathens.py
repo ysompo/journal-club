@@ -301,7 +301,7 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
     """
     import sys
     print(f"\n[OA Generic Auth] Article: {article_url[:60]}")
-    print(f"[OA] Running on: {sys.platform} (headless: {page.context.browser.name})")
+    print(f"[OA] Browser: {page.context.browser.browser_type.name}")
     sys.stdout.flush()
 
     # If the Chrome extension already captured the PDF (cached session), skip auth entirely
@@ -429,7 +429,7 @@ def authenticate_openathens(page: Page, article_url: str, email: str, password: 
         print(f"   Timeout. URL: {page.url}")
 
     time.sleep(3)
-    page.goto(article_url, wait_until="domcontentloaded")
+    page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
     print(f"   Authenticated page: {page.title()[:80]}")
 
