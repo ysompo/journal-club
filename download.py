@@ -31,6 +31,11 @@ from journal_club.auth_springer import authenticate_springer
 _COOKIE_FILE = ".jc_session_cookies.json"
 
 
+class DownloadCancelledError(Exception):
+    """Raised when a download is cancelled by the user."""
+    pass
+
+
 def _load_cookies(context, cfg) -> None:
     """Load saved session cookies from disk into the Playwright context."""
     cookie_path = os.path.join(cfg.output_dir, _COOKIE_FILE)
@@ -63,12 +68,14 @@ def slugify(url: str) -> str:
     return slug[:80]
 
 
-def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]:
+def download_article(input_str: str, cfg: Config, abort_check=None) -> tuple[ArticleMetadata, str]:
     """
     Resolve *input_str* (PMID / PubMed URL / DOI / article URL), authenticate,
     download the PDF, save it to disk, and return (metadata, pdf_path).
 
+    Optional abort_check: callable that returns True if download should be cancelled.
     Raises RuntimeError if the PDF could not be captured.
+    Raises DownloadCancelledError if abort_check returns True.
     """
     # ── 1. Resolve input → ArticleMetadata + publisher URL ───────────────────
     meta = resolve(input_str)
@@ -86,6 +93,9 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
     print("=" * 60)
 
     # ── 1b. Try Unpaywall for open-access PDF ──────────────────────────────
+    if abort_check and abort_check():
+        raise DownloadCancelledError("Download cancelled by user")
+
     if meta.doi:
         from journal_club.unpaywall import query_unpaywall
         oa = query_unpaywall(meta.doi, cfg.huji_email)
@@ -102,12 +112,18 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
 
     # ── 2. Browser session (up to 2 attempts) ────────────────────────────────
     for attempt in range(1, 3):
+        if abort_check and abort_check():
+            raise DownloadCancelledError("Download cancelled by user")
+
         if attempt > 1:
             print(f"\n[Retry] Attempt {attempt} — PDF not captured, retrying browser session...")
             time.sleep(3)
             captured = []
 
         with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
+            if abort_check and abort_check():
+                raise DownloadCancelledError("Download cancelled by user")
+
             captured = attach_pdf_hooks(context, page)
             set_download_behavior(context, page, cfg.output_dir)
             _load_cookies(context, cfg)
@@ -132,6 +148,9 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
                 print(f"[Download] Article navigation error (continuing): {e}")
             time.sleep(3)
 
+            if abort_check and abort_check():
+                raise DownloadCancelledError("Download cancelled by user")
+
             oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
 
             if not oa_ok:
@@ -154,6 +173,9 @@ def download_article(input_str: str, cfg: Config) -> tuple[ArticleMetadata, str]
                     authenticate_springer(**auth_kwargs)
                 else:  # OPENATHENS_GENERIC
                     auth_pdf_url = authenticate_openathens(**auth_kwargs)
+
+                if abort_check and abort_check():
+                    raise DownloadCancelledError("Download cancelled by user")
 
                 wait_for_pdf(captured, timeout_s=15, output_dir=cfg.output_dir)
 

@@ -1,18 +1,9 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}Admin Settings · Journal Club{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl mx-auto px-6 py-10">
-  <div class="flex items-center justify-between mb-1">
-    <h1 class="font-headline text-2xl font-bold text-on-surface">Admin settings</h1>
-    <form method="POST" action="{{ url_for('admin_logout') }}">
-      <button type="submit"
-        class="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-500 transition-colors font-semibold">
-        <span class="material-symbols-outlined text-base">logout</span>
-        Sign out
-      </button>
-    </form>
-  </div>
+  <h1 class="font-headline text-2xl font-bold text-on-surface mb-1">Admin Settings</h1>
   <p class="text-sm text-slate-400 mb-8">Email delivery configuration. Not visible to regular users.</p>
 
   <!-- Save status toast -->

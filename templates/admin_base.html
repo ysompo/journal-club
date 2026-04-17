@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en" class="">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}Journal Club — Admin{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&family=Inter:wght@400;600&family=Work+Sans:wght@500&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary:                    '#005977',
+            'primary-container':        '#007398',
+            'on-primary':               '#ffffff',
+            'on-primary-container':     '#ffffff',
+            'secondary':                '#9f4200',
+            'secondary-fixed':          '#ffdbcb',
+            'on-secondary-fixed-variant':'#5c1f00',
+            'surface-container-low':    '#f3f3f6',
+            'surface-container':        '#e9e9ec',
+            'surface-container-high':   '#dcdcdf',
+            'surface-container-highest':'#d0d0d3',
+            'on-surface':               '#191c1e',
+            'on-surface-variant':       '#41484d',
+            'outline':                  '#71787e',
+          },
+          fontFamily: {
+            headline: ['"Noto Serif"', 'serif'],
+            body:     ['Inter', 'sans-serif'],
+            label:    ['"Work Sans"', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <script>
+    // Base path for absolute API calls — set from Flask's SCRIPT_NAME (e.g. /tools/journal-club)
+    const APP_BASE = {{ request.script_root | tojson }};
+  </script>
+  <style>
+    .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
+    .fill-icon { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+    /* Make error/warning/info messages selectable for debugging */
+    .error-message, .warning-message, .info-message, .debug-message, pre, code {
+      user-select: text;
+      -webkit-user-select: text;
+      -moz-user-select: text;
+      -ms-user-select: text;
+    }
+
+    /* Font size scale — applied to <html> so rem units cascade everywhere */
+    html.fs-sm  { font-size: 13px; }
+    html.fs-md  { font-size: 15px; }   /* default */
+    html.fs-lg  { font-size: 17px; }
+    html.fs-xl  { font-size: 19px; }
+
+    /* Light mode base */
+    body { font-family: 'Inter', sans-serif; background: #f9f9fb; color: #191c1e; transition: background .2s, color .2s; }
+
+    /* Dark mode overrides */
+    html.dark body          { background: #0f1214; color: #e2e4e6; }
+    html.dark aside         { background: #1a1d20 !important; border-color: #2a2d30 !important; }
+    html.dark main          { background: #0f1214; }
+    html.dark .bg-white     { background: #1e2124 !important; }
+    html.dark .bg-slate-50  { background: #1a1d20 !important; }
+    html.dark .bg-slate-100 { background: #232629 !important; }
+    html.dark .border-slate-200 { border-color: #2e3235 !important; }
+    html.dark .border-slate-100 { border-color: #252829 !important; }
+    html.dark .text-slate-400   { color: #7a8490 !important; }
+    html.dark .text-slate-500   { color: #8a9099 !important; }
+    html.dark .text-on-surface  { color: #e2e4e6 !important; }
+    html.dark .text-on-surface-variant { color: #b0b8c0 !important; }
+    html.dark .hover\:bg-slate-100:hover { background: #232629 !important; }
+    html.dark .hover\:bg-slate-50:hover  { background: #1d2023 !important; }
+    html.dark input, html.dark textarea  { background: #252829 !important; color: #e2e4e6 !important; border-color: #3a3d40 !important; }
+    html.dark .divide-slate-100 > * { border-color: #252829 !important; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen">
+
+  <!-- Admin Sidebar -->
+  <aside class="h-full w-64 fixed left-0 top-0 pt-6 pb-4 px-3 flex flex-col gap-4 bg-slate-50 border-r border-slate-200 z-40">
+    <!-- Logo -->
+    <div class="px-3 mb-2">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-primary rounded flex items-center justify-center text-white font-headline font-bold text-sm">JC</div>
+        <div>
+          <h3 class="font-headline text-sm font-bold text-primary leading-tight">Admin Panel</h3>
+          <p class="text-[10px] text-slate-400 font-label tracking-wider uppercase">Journal Club</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Nav -->
+    <nav class="space-y-1 flex-1">
+      <a href="{{ url_for('admin_settings') }}"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'admin_settings' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'admin_settings' %}fill-icon{% endif %}">settings</span>
+        <span>Settings</span>
+      </a>
+      <a href="{{ url_for('debug_screenshots') }}"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'debug_screenshots' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'debug_screenshots' %}fill-icon{% endif %}">screenshot_monitor</span>
+        <span>Debug Screenshots</span>
+      </a>
+      <a href="{{ url_for('admin_access_requests') }}"
+         class="flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors
+                {% if page == 'admin_access_requests' %}bg-primary/10 text-primary{% else %}text-slate-500 hover:bg-slate-100{% endif %}">
+        <span class="material-symbols-outlined {% if page == 'admin_access_requests' %}fill-icon{% endif %}">people</span>
+        <span>Access Requests</span>
+      </a>
+    </nav>
+
+    <!-- Bottom controls: dark mode + font size + logout -->
+    <div class="border-t border-slate-200 pt-3 space-y-2">
+
+      <!-- Dark mode toggle -->
+      <div class="flex items-center justify-between px-3 py-1.5">
+        <div class="flex items-center gap-2 text-slate-500 text-sm font-semibold">
+          <span class="material-symbols-outlined text-base" id="theme-icon">light_mode</span>
+          <span id="theme-label">Light</span>
+        </div>
+        <button onclick="toggleDark()"
+          id="dark-toggle"
+          class="relative w-10 h-5 rounded-full transition-colors duration-200 bg-slate-300 dark-toggle-bg focus:outline-none">
+          <span id="dark-knob"
+            class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"></span>
+        </button>
+      </div>
+
+      <!-- Font size -->
+      <div class="flex items-center justify-between px-3 py-1.5">
+        <div class="flex items-center gap-2 text-slate-500 text-sm font-semibold">
+          <span class="material-symbols-outlined text-base">format_size</span>
+          <span>Text size</span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button onclick="setFontSize('sm')" data-fs="sm"
+            class="fs-btn w-6 h-6 rounded text-xs font-bold text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors">A</button>
+          <button onclick="setFontSize('md')" data-fs="md"
+            class="fs-btn w-6 h-6 rounded text-sm font-bold text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors">A</button>
+          <button onclick="setFontSize('lg')" data-fs="lg"
+            class="fs-btn w-7 h-6 rounded text-base font-bold text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors">A</button>
+          <button onclick="setFontSize('xl')" data-fs="xl"
+            class="fs-btn w-7 h-6 rounded text-lg font-bold text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors">A</button>
+        </div>
+      </div>
+
+      <!-- Logout button -->
+      <form method="POST" action="{{ url_for('admin_logout') }}">
+        <button type="submit"
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded font-body font-semibold text-sm transition-colors text-slate-500 hover:bg-slate-100">
+          <span class="material-symbols-outlined">logout</span>
+          <span>Logout</span>
+        </button>
+      </form>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="ml-64 min-h-screen">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+
+  <!-- Theme + font persistence -->
+  <script>
+    // ── Init from localStorage ────────────────────────────────────────────────
+    (function() {
+      const dark = localStorage.getItem('jc-dark') === '1';
+      const fs   = localStorage.getItem('jc-fs') || 'md';
+      if (dark) document.documentElement.classList.add('dark');
+      document.documentElement.classList.add('fs-' + fs);
+      syncUI(dark, fs);
+    })();
+
+    function syncUI(dark, fs) {
+      // Toggle button
+      const knob   = document.getElementById('dark-knob');
+      const toggle = document.getElementById('dark-toggle');
+      const icon   = document.getElementById('theme-icon');
+      const label  = document.getElementById('theme-label');
+      if (knob && toggle) {
+        knob.style.transform = dark ? 'translateX(20px)' : 'translateX(0)';
+        toggle.style.backgroundColor = dark ? '#005977' : '';
+      }
+      if (icon)  icon.textContent  = dark ? 'dark_mode' : 'light_mode';
+      if (label) label.textContent = dark ? 'Dark' : 'Light';
+
+      // Font size buttons
+      document.querySelectorAll('.fs-btn').forEach(btn => {
+        const active = btn.dataset.fs === fs;
+        btn.classList.toggle('text-primary', active);
+        btn.classList.toggle('bg-primary/10', active);
+        btn.classList.toggle('text-slate-400', !active);
+      });
+    }
+
+    function toggleDark() {
+      const isDark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('jc-dark', isDark ? '1' : '0');
+      syncUI(isDark, localStorage.getItem('jc-fs') || 'md');
+    }
+
+    function setFontSize(size) {
+      ['sm','md','lg','xl'].forEach(s => document.documentElement.classList.remove('fs-' + s));
+      document.documentElement.classList.add('fs-' + size);
+      localStorage.setItem('jc-fs', size);
+      syncUI(document.documentElement.classList.contains('dark'), size);
+    }
+  </script>
+</body>
+</html>

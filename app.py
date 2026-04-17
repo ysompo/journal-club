@@ -146,6 +146,12 @@ _download_queue: list[dict] = []
 _queue_lock = threading.Lock()
 MAX_QUEUE = 15  # max items waiting (not counting the active download)
 
+# Global cancel flag: when set to an article_id, the download_article() function
+# will raise DownloadCancelledError at its next abort_check() call.
+# Cleared in _build_run's finally block after lock release and in cancel_download
+# when removing from queue. Should NOT persist across downloads to avoid false positives.
+_download_abort_article_id = None
+
 # ── Email job state ───────────────────────────────────────────────────────────
 _email_job: dict = {
     "running": False,
@@ -162,19 +168,35 @@ _email_job_lock = threading.Lock()
 def _build_run(article_id, toc_article_id, meta, runtime_cfg, session_id):
     """Return the download thread function for a single article."""
     def _run():
+        global _download_abort_article_id
         try:
             storage.set_download_error(article_id, "")
             if not runtime_cfg.huji_email or not runtime_cfg.huji_password:
                 raise ValueError(
                     "HUJI credentials not configured — go to Settings to enter your email and password."
                 )
-            from download import download_article
+            from download import download_article, DownloadCancelledError
             app.logger.info("[Download] Starting download for article_id=%s url=%s", article_id, meta.url)
-            _, pdf_path = download_article(meta.url, runtime_cfg)
+
+            # Check if cancellation was requested before starting
+            if _download_abort_article_id == article_id:
+                app.logger.info("[Download] Cancellation requested before start for article_id=%s", article_id)
+                storage.set_download_error(article_id, "User cancelled")
+                return
+
+            # Define abort_check callback that download_article can call periodically
+            def should_abort():
+                return _download_abort_article_id == article_id
+
+            _, pdf_path = download_article(meta.url, runtime_cfg, abort_check=should_abort)
+
             storage.update_pdf_path(article_id, pdf_path)
             app.logger.info("[Download] Success article_id=%s pdf=%s", article_id, pdf_path)
             if toc_article_id:
                 storage.link_reading_list_to_article(toc_article_id, article_id)
+        except DownloadCancelledError:
+            app.logger.info("[Download] User cancelled article_id=%s", article_id)
+            storage.set_download_error(article_id, "User cancelled")
         except Exception as e:
             app.logger.error("[Download thread] article_id=%s error: %s", article_id, e, exc_info=True)
             # Safety net: the PDF may have been saved to disk before the exception
@@ -223,6 +245,7 @@ def _build_run(article_id, toc_article_id, meta, runtime_cfg, session_id):
                 _download_lock_meta["article_id"] = None
                 _download_lock_meta["toc_article_id"] = None
                 _download_lock_meta["title"] = None
+                _download_abort_article_id = None
                 _download_lock.release()
             _start_next_queued()
     return _run
@@ -460,8 +483,44 @@ def download_status(article_id: int):
     if art.get("pdf_path"):
         return jsonify({"status": "done", "article_id": article_id})
     if art.get("download_error"):
-        return jsonify({"status": "failed", "error": art["download_error"]})
+        error = art["download_error"]
+        # Check if this was a user cancellation
+        if "cancelled" in error.lower():
+            return jsonify({"status": "cancelled"})
+        return jsonify({"status": "failed", "error": error})
     return jsonify({"status": "downloading"})
+
+
+@app.route("/download/cancel/<int:article_id>", methods=["POST"])
+def cancel_download(article_id: int):
+    """Cancel a queued or active download."""
+    global _download_abort_article_id
+
+    art = storage.get_by_id(article_id)
+    if not art:
+        return jsonify({"status": "unknown"}), 404
+
+    # If already done or has error, can't cancel
+    if art.get("pdf_path") or art.get("download_error"):
+        return jsonify({"status": "too_late"}), 400
+
+    # Try to remove from queue
+    with _queue_lock:
+        for i, item in enumerate(_download_queue):
+            if item["article_id"] == article_id:
+                _download_queue.pop(i)
+                storage.set_download_error(article_id, "User cancelled")
+                _download_abort_article_id = None  # Clear abort flag to prevent stale state
+                app.logger.info("[Download] Cancelled queued article_id=%s", article_id)
+                return jsonify({"status": "cancelled"})
+
+    # If not in queue, must be active download
+    if _download_lock_meta["article_id"] == article_id:
+        _download_abort_article_id = article_id
+        app.logger.info("[Download] Marked article_id=%s for cancellation", article_id)
+        return jsonify({"status": "cancelling"})
+
+    return jsonify({"status": "not_found"}), 404
 
 
 @app.route("/download/report-error/<int:article_id>", methods=["POST"])
@@ -822,7 +881,7 @@ def admin_logout():
 def admin_settings():
     s = storage.get_all_settings()
     rc = get_runtime_config()
-    return render_template("admin_settings.html", page="admin", cfg=rc)
+    return render_template("admin_settings.html", page="admin_settings", cfg=rc)
 
 
 @app.route("/admin/settings", methods=["POST"])
@@ -835,6 +894,13 @@ def admin_settings_save():
     return jsonify({"status": "saved"})
 
 
+@app.route("/admin/access-requests")
+@require_admin
+def admin_access_requests():
+    """Admin page for managing access requests."""
+    return render_template("admin_access_requests.html", page="admin_access_requests")
+
+
 # ── Debug screenshots (admin-only) ───────────────────────────────────────────
 
 @app.route("/admin/debug-screenshots")
@@ -842,11 +908,7 @@ def admin_settings_save():
 def debug_screenshots():
     import glob
     files = sorted(glob.glob("debug_*.png"), reverse=True)
-    links = "".join(
-        f'<li><a href="{url_for("debug_screenshot_file", filename=f)}">{f}</a></li>'
-        for f in files
-    )
-    return f"<ul>{links}</ul>" if links else "No debug screenshots found."
+    return render_template("admin_debug_screenshots.html", page="debug_screenshots", files=files)
 
 
 @app.route("/admin/debug-screenshots/<path:filename>")

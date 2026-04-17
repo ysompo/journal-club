@@ -487,7 +487,16 @@ function toggleReadingList(tocArticleId, btn) {
 
 // ── Download PDF ──────────────────────────────────────────────────────────────
 function downloadPdf(url, tocArticleId, btn) {
+  const currentState = btn.dataset.dlState || 'idle';
+
+  // If already downloading or queued, cancel instead
+  if (currentState === 'queued' || currentState === 'downloading') {
+    cancelDownload(btn.dataset.articleId, btn);
+    return;
+  }
+
   btn.disabled = true;
+  btn.dataset.dlState = 'queued';
   btn.innerHTML = '<span class="material-symbols-outlined text-sm">hourglass_empty</span> Queuing…';
   fetch('./download', {
     method: 'POST',
@@ -498,6 +507,7 @@ function downloadPdf(url, tocArticleId, btn) {
   .then(({data, status}) => {
     if (data.error) {
       btn.disabled = false;
+      btn.dataset.dlState = 'idle';
       btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> ' +
         (status === 429 ? 'Queue full' : 'Failed');
       setTimeout(() => {
@@ -506,13 +516,36 @@ function downloadPdf(url, tocArticleId, btn) {
       }, 4000);
       return;
     }
+    btn.dataset.articleId = data.article_id;
     if (data.queued) {
+      btn.dataset.dlState = 'queued';
       btn.innerHTML = `<span class="material-symbols-outlined text-sm">schedule</span> Queued (#${data.position})`;
     } else {
+      btn.dataset.dlState = 'downloading';
       btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
     }
     pollDownload(data.article_id, btn);
   });
+}
+
+function cancelDownload(articleId, btn) {
+  btn.disabled = true;
+  btn.dataset.dlState = 'cancelling';
+  btn.innerHTML = '<span class="material-symbols-outlined text-sm">close</span> Cancelling…';
+
+  fetch(`./download/cancel/${articleId}`, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      // Clear poll if running and reset button
+      btn.dataset.dlState = 'idle';
+      btn.innerHTML = '<span class="material-symbols-outlined text-sm">download</span> PDF';
+      btn.disabled = false;
+    })
+    .catch(() => {
+      btn.dataset.dlState = 'idle';
+      btn.innerHTML = '<span class="material-symbols-outlined text-sm">download</span> PDF';
+      btn.disabled = false;
+    });
 }
 
 function pollDownload(articleId, btn) {
@@ -536,12 +569,14 @@ function pollDownload(articleId, btn) {
           fetch('./download/active').then(r => r.json()).then(a => {
             if (a.active && a.article_id === articleId) {
               wasQueued = false;
+              btn.dataset.dlState = 'downloading';
               btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Downloading…';
             }
           }).catch(() => {});
         }
         if (data.status === 'done') {
           clearInterval(poll);
+          btn.dataset.dlState = 'idle';
           // Show a brief success state then reload so the Jinja template renders
           // the correct "View PDF" link from the updated DB state.
           btn.innerHTML = '<span class="material-symbols-outlined text-sm">check_circle</span> Done!';
@@ -550,9 +585,16 @@ function pollDownload(articleId, btn) {
             sessionStorage.setItem('scrollPos', window.scrollY);
             window.location.reload();
           }, 1200);
+        } else if (data.status === 'cancelled') {
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.dataset.dlState = 'idle';
+          btn.innerHTML = '<span class="material-symbols-outlined text-sm">download</span> PDF';
+          btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-primary text-white hover:bg-primary-container transition-colors';
         } else if (data.status === 'failed') {
           clearInterval(poll);
           btn.disabled = false;
+          btn.dataset.dlState = 'idle';
           btn.className = 'pdf-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors';
           btn.title = data.error || 'Download failed';
           btn.innerHTML = '<span class="material-symbols-outlined text-sm">error</span> Failed';

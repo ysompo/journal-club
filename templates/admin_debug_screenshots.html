@@ -1,0 +1,24 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Debug Screenshots — Journal Club{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-6 py-10">
+  <h1 class="font-headline text-2xl font-bold text-on-surface mb-6">Debug Screenshots</h1>
+
+  {% if files %}
+    <ul class="space-y-2">
+      {% for f in files %}
+        <li>
+          <a href="{{ url_for('debug_screenshot_file', filename=f) }}"
+             class="text-primary hover:underline font-mono text-sm">
+            {{ f }}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-slate-400">No debug screenshots found.</p>
+  {% endif %}
+</div>
+{% endblock %}
