@@ -27,6 +27,38 @@ _PDF_LINK_JS = """
 }
 """
 
+def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout_s: int = 15) -> bool:
+    """Try Wiley's /doi/epdf/ pattern for open-access articles. Returns True if PDF captured."""
+    url = page.url
+    if "wiley.com" not in url or "/doi/" not in url:
+        return False
+
+    # Convert /doi/10.xxxx to /doi/epdf/10.xxxx
+    epdf_url = url.replace("/doi/", "/doi/epdf/")
+    if epdf_url == url:
+        return False
+
+    print(f"   [OA Check] Trying Wiley epdf pattern: {epdf_url[:80]}")
+
+    try:
+        pdf_tab = context.new_page()
+        pdf_tab.goto(epdf_url, wait_until="commit", timeout=15_000)
+        time.sleep(1)
+
+        # Check if we got a PDF or a redirect
+        if "pdf" in pdf_tab.url.lower() or pdf_tab.url == epdf_url:
+            if not captured:
+                wait_for_pdf(captured, timeout_s=timeout_s)
+            pdf_tab.close()
+            if captured:
+                print("   [OA Check] ✓ Wiley epdf link successful!")
+                return True
+        pdf_tab.close()
+    except Exception as e:
+        print(f"   [OA Check] Wiley epdf failed: {e}")
+    return False
+
+
 def check_open_access(page: Page, context: BrowserContext,
                       captured: list, timeout_s: int = 15) -> tuple[bool, str | None]:
     """
@@ -35,7 +67,13 @@ def check_open_access(page: Page, context: BrowserContext,
     Returns (True, pdf_url) if PDF captured, (False, pdf_url) if link found but blocked,
     (False, None) if no PDF link found.
     """
-    print("\n[OA Check] Scanning DOM for direct PDF link...")
+    print("\n[OA Check] Checking for open-access PDF...")
+
+    # Try Wiley epdf pattern first
+    if _try_wiley_epdf(page, context, captured, timeout_s):
+        return True, None
+
+    print("[OA Check] Scanning DOM for direct PDF link...")
 
     try:
         page.wait_for_load_state("networkidle", timeout=8000)
