@@ -16,3 +16,12 @@ nejm_*
 downloads
 journal_club
 pdfs
+app.py
+wsgi.py
+requirements.txt
+requirements-prod.txt
+config.yaml
+build.sh
+download.py
+tests/
+docs/
