@@ -1,0 +1,13 @@
+{
+  "name": "journal-club-monorepo",
+  "private": true,
+  "scripts": {
+    "dev:pwa": "pnpm --filter pwa dev",
+    "dev:desktop": "pnpm --filter desktop tauri dev",
+    "build:pwa": "pnpm --filter pwa build",
+    "build:desktop": "pnpm --filter desktop tauri build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

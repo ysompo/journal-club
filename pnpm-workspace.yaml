@@ -1,0 +1,4 @@
+packages:
+  - 'pwa'
+  - 'desktop'
+  - 'shared'

@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd pwa && pnpm build",
+  "outputDirectory": "pwa/.next",
+  "installCommand": "pnpm install"
+}

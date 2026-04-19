@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&family=Inter:wght@400;600&family=Work+Sans:wght@500&display=swap");
+
+@theme inline {
+  --color-surface: #f9f9fb;
+  --color-surface-container-low: #f3f3f6;
+  --color-surface-container: #edeef0;
+  --color-surface-container-high: #e7e8ea;
+  --color-surface-container-highest: #e2e2e4;
+  --color-surface-container-lowest: #ffffff;
+  --color-on-surface: #191c1e;
+  --color-on-surface-variant: #3f484e;
+  --color-primary: #005977;
+  --color-primary-container: #007398;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #d7f0ff;
+  --color-primary-fixed: #c1e8ff;
+  --color-secondary: #9f4200;
+  --color-secondary-container: #fd7216;
+  --color-on-secondary: #ffffff;
+  --color-outline: #6f787e;
+  --color-outline-variant: #bfc8ce;
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+
+  --font-headline: "Noto Serif", serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Work Sans", sans-serif;
+
+  --radius: 0.125rem;
+  --radius-lg: 0.25rem;
+}
+
+:root {
+  font-family: var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  margin: 0;
+}
