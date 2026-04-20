@@ -1,0 +1,72 @@
+name: Release Desktop App
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Python sidecar
+        run: |
+          pip install pyinstaller -r desktop/src-tauri/sidecar/requirements.txt
+          pyinstaller --onefile desktop/src-tauri/sidecar/jc-download.py `
+            --name jc-download `
+            --add-data "journal_club;journal_club" `
+            --add-data "download.py;." `
+            --distpath desktop/src-tauri/binaries
+
+      - name: Rename sidecar to Tauri target triple
+        run: |
+          Rename-Item `
+            desktop/src-tauri/binaries/jc-download.exe `
+            jc-download-x86_64-pc-windows-msvc.exe
+
+      - name: Install frontend dependencies
+        run: pnpm install
+        working-directory: desktop
+
+      - name: Build and publish Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "Journal Club ${{ github.ref_name }}"
+          releaseBody: "See release notes."
+          releaseDraft: false
+          prerelease: false
