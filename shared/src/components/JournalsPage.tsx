@@ -422,11 +422,12 @@ export function JournalsPage({ api }: Props) {
                   </button>
                 )}
                 <button
-                  onClick={e => toggleFollow(selectedJournal, e)}
-                  disabled={followingId === selectedJournal.id}
-                  style={S.followBtn(selectedJournal.is_following, followingId === selectedJournal.id)}
+                  onClick={() => loadTocForId(selectedJournal.id, currentScope)}
+                  disabled={currentLoading}
+                  style={S.refreshBtn(currentLoading)}
+                  title="Refresh articles"
                 >
-                  {followingId === selectedJournal.id ? "…" : selectedJournal.is_following ? "Following ✓" : "+ Follow"}
+                  {currentLoading ? "…" : "↺ Refresh"}
                 </button>
               </div>
             </div>
@@ -712,6 +713,15 @@ const S = {
     background: "var(--color-accent, #C0783A)", color: "#fff",
     fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: "0.8rem", cursor: "pointer",
   } as CSSProperties,
+
+  refreshBtn: (loading: boolean) => ({
+    padding: "0.35rem 0.875rem", borderRadius: "0.25rem", cursor: loading ? "default" : "pointer",
+    border: "1px solid var(--color-border, #D8D0C4)",
+    background: "transparent",
+    color: "var(--color-text-secondary, #5A6475)",
+    fontFamily: "'DM Sans', sans-serif", fontWeight: 500, fontSize: "0.8rem",
+    opacity: loading ? 0.5 : 1, transition: "opacity 0.15s",
+  } as CSSProperties),
 
   scopePill: (active: boolean) => ({
     padding: "0.22rem 0.75rem", borderRadius: "1rem",

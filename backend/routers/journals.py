@@ -39,15 +39,16 @@ def _cache_fresh(key: tuple) -> list | None:
     return articles
 
 
-async def _fetch_pubmed_toc(issn: str, months: int) -> list[dict]:
+async def _fetch_pubmed_toc(issn: str, months: int, abbreviation: str = "") -> list[dict]:
     since = (datetime.now(timezone.utc) - timedelta(days=months * 31)).strftime("%Y/%m/%d")
     today = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+    date_filter = f'("{since}"[PDAT]:"{today}"[PDAT])'
 
     async with httpx.AsyncClient(timeout=20) as client:
-        # Step 1: esearch — get PMIDs
+        # Step 1: esearch — get PMIDs by ISSN
         r = await client.get(PUBMED_ESEARCH, params={
             "db": "pubmed",
-            "term": f'"{issn}"[ISSN] AND ("{since}"[PDAT]:"{today}"[PDAT])',
+            "term": f'"{issn}"[ISSN] AND {date_filter}',
             "retmax": 100,
             "retmode": "json",
             "sort": "pub+date",
@@ -57,6 +58,21 @@ async def _fetch_pubmed_toc(issn: str, months: int) -> list[dict]:
         r.raise_for_status()
         data = r.json()
         pmids = data.get("esearchresult", {}).get("idlist", [])
+
+        # Fallback: search by journal title abbreviation [TA] if ISSN returned nothing
+        if not pmids and abbreviation:
+            r2a = await client.get(PUBMED_ESEARCH, params={
+                "db": "pubmed",
+                "term": f'"{abbreviation}"[TA] AND {date_filter}',
+                "retmax": 100,
+                "retmode": "json",
+                "sort": "pub+date",
+                "tool": PUBMED_TOOL,
+                "email": PUBMED_EMAIL,
+            })
+            r2a.raise_for_status()
+            pmids = r2a.json().get("esearchresult", {}).get("idlist", [])
+
         if not pmids:
             return []
 
@@ -182,7 +198,7 @@ async def get_journal_toc(
     if cached is not None:
         return cached
 
-    articles = await _fetch_pubmed_toc(row["issn"], months)
+    articles = await _fetch_pubmed_toc(row["issn"], months, row["abbreviation"])
     _toc_cache[key] = (datetime.now(timezone.utc), articles)
     return articles
 
