@@ -63,6 +63,7 @@ export interface User {
   last_active: string | null;
   storage_bytes_used: number;
   storage_limit_bytes: number;
+  is_admin?: boolean;
 }
 
 export interface DevicePairing {
@@ -78,4 +79,37 @@ export interface Settings {
   theme: "light" | "dark" | "system";
   font_size: "small" | "medium" | "large";
   email_addresses: string[];  // max 3
+}
+
+export interface Journal {
+  id: string;
+  full_name: string;
+  abbreviation: string;
+  issn: string;
+  category: "general" | "obgyn" | "custom";
+  is_following: boolean;
+}
+
+export interface TocArticle {
+  pmid: string;
+  title: string;
+  authors: string[];
+  journal: string;
+  pub_date: string;
+  abstract: string | null;
+  doi: string | null;
+  url: string;
+}
+
+export interface HistoryItem {
+  id: string;
+  pmid: string | null;
+  doi: string | null;
+  title: string;
+  authors: string[];
+  journal: string | null;
+  pub_date: string | null;
+  abstract: string | null;
+  url: string | null;
+  queued_at: string;
 }

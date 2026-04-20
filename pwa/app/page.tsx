@@ -6,7 +6,7 @@ import { isAuthed } from "./lib/auth";
 export default function Home() {
   const router = useRouter();
   useEffect(() => {
-    router.replace(isAuthed() ? "/archive" : "/login");
+    router.replace(isAuthed() ? "/journals" : "/login");
   }, [router]);
   return null;
 }

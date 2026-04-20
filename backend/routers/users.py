@@ -146,3 +146,24 @@ async def pair_tablet(req: PairTabletRequest, db: aiosqlite.Connection = Depends
 @router.get("/me")
 async def me(user=Depends(get_current_user)):
     return {k: v for k, v in user.items() if k != "password_hash"}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    user=Depends(get_current_user),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    if not verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    await db.execute(
+        "UPDATE users SET password_hash=? WHERE id=?",
+        (hash_password(req.new_password), user["id"]),
+    )
+    await db.commit()
+    return {"ok": True}

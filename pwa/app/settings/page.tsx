@@ -18,6 +18,13 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSaved, setPwSaved] = useState(false);
+
   useEffect(() => {
     if (!loadToken()) { router.replace("/login"); return; }
     api.getSettings().then(s => {
@@ -31,6 +38,14 @@ export default function SettingsPage() {
     });
   }, [router]);
 
+  // Apply font size to DOM whenever it changes (real-time preview + persists across navigation)
+  const FONT_SIZES: Record<FontSize, string> = { small: "14px", medium: "16px", large: "18px" };
+  useEffect(() => {
+    if (loading) return;
+    document.documentElement.style.fontSize = FONT_SIZES[fontSize];
+    localStorage.setItem("jc-font-size", fontSize);
+  }, [fontSize, loading]);
+
   async function save() {
     setSaving(true);
     setError(null);
@@ -43,6 +58,24 @@ export default function SettingsPage() {
       setError("Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function changePassword() {
+    setPwError(null);
+    if (!currentPw || !newPw || !confirmPw) { setPwError("All fields required"); return; }
+    if (newPw !== confirmPw) { setPwError("Passwords do not match"); return; }
+    if (newPw.length < 8) { setPwError("Password must be at least 8 characters"); return; }
+    setPwSaving(true);
+    try {
+      await api.changePassword(currentPw, newPw);
+      setCurrentPw(""); setNewPw(""); setConfirmPw("");
+      setPwSaved(true);
+      setTimeout(() => setPwSaved(false), 2000);
+    } catch (err: any) {
+      setPwError(err?.message ?? "Failed to change password");
+    } finally {
+      setPwSaving(false);
     }
   }
 
@@ -68,7 +101,7 @@ export default function SettingsPage() {
     <div style={{ minHeight: "100dvh", background: "var(--color-surface)", display: "flex", flexDirection: "column" }}>
       <header style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--color-surface-container-lowest)", borderBottom: "1px solid var(--color-outline-variant)", padding: "0.625rem 1rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
         <button
-          onClick={() => router.push("/archive")}
+          onClick={() => router.push("/journals")}
           style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontFamily: "var(--font-label)", fontSize: "0.875rem", padding: "0.2rem 0" }}
         >
           ← Back
@@ -163,6 +196,37 @@ export default function SettingsPage() {
             >
               {saving ? "Saving…" : "Save settings"}
             </button>
+            {/* Change password */}
+            <section>
+              <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", fontFamily: "var(--font-label)", color: "var(--color-on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Change Password
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                {(["Current password", "New password", "Confirm new password"] as const).map((label, i) => {
+                  const val = [currentPw, newPw, confirmPw][i];
+                  const setter = [setCurrentPw, setNewPw, setConfirmPw][i];
+                  return (
+                    <input
+                      key={label}
+                      type="password"
+                      placeholder={label}
+                      value={val}
+                      onChange={e => setter(e.target.value)}
+                      style={{ padding: "0.5rem 0.75rem", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius)", background: "var(--color-surface-container)", color: "var(--color-on-surface)", fontFamily: "var(--font-body)", fontSize: "0.875rem", outline: "none" }}
+                    />
+                  );
+                })}
+                {pwError && <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--color-error)" }}>{pwError}</p>}
+                {pwSaved && <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--color-primary)" }}>Password changed!</p>}
+                <button
+                  onClick={changePassword}
+                  disabled={pwSaving}
+                  style={{ alignSelf: "flex-start", padding: "0.5rem 1.25rem", background: "var(--color-primary)", color: "var(--color-on-primary)", border: "none", borderRadius: "var(--radius)", fontFamily: "var(--font-label)", fontSize: "0.875rem", fontWeight: 500, cursor: "pointer", opacity: pwSaving ? 0.6 : 1 }}
+                >
+                  {pwSaving ? "Saving…" : "Change password"}
+                </button>
+              </div>
+            </section>
           </>
         )}
       </main>

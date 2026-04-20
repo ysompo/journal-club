@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from database import init_db
 from config import FRONTEND_ORIGINS, DB_PATH, APP_VERSION
-from routers import users, articles, queue, devices, settings, admin
+from routers import users, articles, queue, devices, settings, admin, journals, history
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -51,6 +51,8 @@ app.include_router(queue.router)
 app.include_router(devices.router)
 app.include_router(settings.router)
 app.include_router(admin.router)
+app.include_router(journals.router)
+app.include_router(history.router)
 
 
 @app.get("/health")

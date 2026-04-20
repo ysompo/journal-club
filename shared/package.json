@@ -8,6 +8,13 @@
     ".": "./src/index.ts",
     "./tokens": "./src/tokens.ts",
     "./types": "./src/types.ts",
-    "./api": "./src/api.ts"
+    "./api": "./src/api.ts",
+    "./components": "./src/components/index.ts"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0"
   }
 }

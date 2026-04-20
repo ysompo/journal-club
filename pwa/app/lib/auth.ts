@@ -1,4 +1,5 @@
 import { api } from "@jc/shared";
+export { api };
 
 const TOKEN_KEY = "jc_access_token";
 

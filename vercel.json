@@ -1,5 +1,6 @@
 {
-  "buildCommand": "cd pwa && pnpm build",
-  "outputDirectory": "pwa/.next",
-  "installCommand": "pnpm install"
+  "framework": null,
+  "buildCommand": "npm install -g pnpm@10.33.0 && cd pwa && pnpm build",
+  "outputDirectory": "pwa/out",
+  "installCommand": "npm install -g pnpm@10.33.0 && pnpm install"
 }

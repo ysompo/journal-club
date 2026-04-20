@@ -1,4 +1,4 @@
-import type { Article, QueueItem, User } from "./types";
+import type { Article, QueueItem, User, Journal, TocArticle, HistoryItem } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -252,6 +252,51 @@ export class JournalClubApi {
   deleteInvite(inviteId: string) { return this.request<{ ok: boolean }>("DELETE", `/admin/invites/${inviteId}`); }
 
   checkVersion() { return this.request<{ version: string; min_client_version: string }>("GET", "/version"); }
+
+  // ── Journals ──────────────────────────────────────────────────────────────
+
+  getJournals() {
+    return this.request<Journal[]>("GET", "/journals/");
+  }
+
+  followJournal(journalId: string) {
+    return this.request<{ ok: boolean }>("POST", `/journals/${journalId}/follow`);
+  }
+
+  unfollowJournal(journalId: string) {
+    return this.request<{ ok: boolean }>("DELETE", `/journals/${journalId}/follow`);
+  }
+
+  getJournalToc(journalId: string, months = 1) {
+    return this.request<TocArticle[]>("GET", `/journals/${journalId}/toc?months=${months}`);
+  }
+
+  addCustomJournal(fullName: string, abbreviation: string, issn: string) {
+    return this.request<Journal>("POST", "/journals/custom", { full_name: fullName, abbreviation, issn });
+  }
+
+  // ── History ───────────────────────────────────────────────────────────────
+
+  getHistory(limit = 50, offset = 0) {
+    return this.request<HistoryItem[]>("GET", `/history/?limit=${limit}&offset=${offset}`);
+  }
+
+  addHistory(item: Omit<HistoryItem, "id" | "queued_at">) {
+    return this.request<{ id: string; queued_at: string }>("POST", "/history/", item);
+  }
+
+  deleteHistory(itemId: string) {
+    return this.request<{ ok: boolean }>("DELETE", `/history/${itemId}`);
+  }
+
+  // ── Users (extended) ──────────────────────────────────────────────────────
+
+  changePassword(currentPassword: string, newPassword: string) {
+    return this.request<{ ok: boolean }>("POST", "/users/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  }
 
   // ── Devices ───────────────────────────────────────────────────────────────
 

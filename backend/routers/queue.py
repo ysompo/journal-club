@@ -54,13 +54,13 @@ async def list_queue(
 ):
     if status:
         async with db.execute(
-            "SELECT * FROM queue WHERE user_id=? AND status=? ORDER BY created_at DESC",
+            "SELECT * FROM queue WHERE user_id=? AND status=? ORDER BY created_at ASC",
             (user["id"], status),
         ) as cur:
             rows = await cur.fetchall()
     else:
         async with db.execute(
-            "SELECT * FROM queue WHERE user_id=? ORDER BY created_at DESC",
+            "SELECT * FROM queue WHERE user_id=? ORDER BY created_at ASC",
             (user["id"],),
         ) as cur:
             rows = await cur.fetchall()
