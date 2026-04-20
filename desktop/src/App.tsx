@@ -1,5 +1,7 @@
 import "./App.css";
 import { useState, useEffect, useCallback } from "react";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { LoginScreen } from "./components/LoginScreen";
 import { HujiSetupScreen } from "./components/HujiSetupScreen";
 import { ServerSetupScreen } from "./components/ServerSetupScreen";
@@ -13,8 +15,6 @@ import { api } from "@jc/shared";
 import { Sidebar, JournalsPage, LibraryPage, BookmarksPage, QueuePage } from "@jc/shared/components";
 import type { Page } from "@jc/shared/components";
 
-const APP_VERSION = "0.1.0";
-
 type AppState = "server-setup" | "loading" | "unauthenticated" | "needs-huji" | "authenticated";
 
 function App() {
@@ -23,7 +23,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState<Update | null>(null);
   const { creds, loaded: keychainLoaded, save: saveCreds } = useKeychain();
 
   const onArticleReady = useCallback(() => setRefreshKey(k => k + 1), []);
@@ -48,8 +48,8 @@ function App() {
 
   useEffect(() => {
     if (appState !== "authenticated") return;
-    api.checkVersion().then(res => {
-      if (res.version !== APP_VERSION) setUpdateAvailable(res.version);
+    check().then(update => {
+      if (update?.available) setUpdateAvailable(update);
     }).catch(() => {});
     api.getMe().then(u => setIsAdmin(!!u.is_admin)).catch(() => {});
   }, [appState]);
@@ -92,8 +92,16 @@ function App() {
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       {updateAvailable && (
         <div style={{ background: "var(--color-primary-fixed)", color: "var(--color-primary)", padding: "0.4rem 1.5rem", fontSize: "0.8rem", fontFamily: "var(--font-body)", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-          <span>A new version ({updateAvailable}) is available. Download the latest installer to update.</span>
-          <button onClick={() => setUpdateAvailable(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontSize: "1rem", padding: "0 0.25rem" }}>×</button>
+          <span>Version {updateAvailable.version} is available.</span>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              onClick={async () => { await updateAvailable.downloadAndInstall(); await relaunch(); }}
+              style={{ background: "var(--color-primary)", color: "var(--color-on-primary)", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem", padding: "0.2rem 0.75rem" }}
+            >
+              Install &amp; Relaunch
+            </button>
+            <button onClick={() => setUpdateAvailable(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontSize: "1rem", padding: "0 0.25rem" }}>×</button>
+          </div>
         </div>
       )}
 
