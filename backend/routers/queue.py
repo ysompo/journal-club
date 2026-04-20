@@ -133,7 +133,7 @@ async def mark_failed(
         raise HTTPException(status_code=404, detail="Queue item not found")
 
     new_count = (row["retry_count"] or 0) + 1
-    final_status = "failed" if new_count >= MAX_RETRIES else "failed"
+    final_status = "failed" if new_count >= MAX_RETRIES else "queued"
 
     await db.execute(
         "UPDATE queue SET status=?, error=?, retry_count=?, updated_at=? WHERE id=? AND user_id=?",

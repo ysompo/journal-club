@@ -140,7 +140,7 @@ async def pair_tablet(req: PairTabletRequest, db: aiosqlite.Connection = Depends
     await db.commit()
 
     token = create_access_token(row["user_id"], device_id)
-    return {"access_token": token, "token_type": "bearer"}
+    return {"access_token": token, "token_type": "bearer", "user_id": row["user_id"]}
 
 
 @router.get("/me")

@@ -13,10 +13,11 @@ STORAGE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024  # 2GB per user
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 REQUIRE_INVITE_CODE = os.environ.get("JC_REQUIRE_INVITE", "false").lower() == "true"
-RESEND_FROM = "Journal Club <noreply@yourdomain.com>"
+RESEND_FROM = os.environ.get("RESEND_FROM", "Journal Club <noreply@example.com>")
 ADMIN_EMAIL = "ysompo@gmail.com"
 
 FRONTEND_ORIGINS = [
-    "http://localhost:3000",
-    "https://journal.yourdomain.com",  # update with real subdomain
+    o.strip()
+    for o in os.environ.get("FRONTEND_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
 ]

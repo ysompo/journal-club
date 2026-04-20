@@ -82,15 +82,9 @@ def main() -> int:
         chrome_path=cmd.get("chrome_path", ""),
     )
 
-    # ── Claim the queue item ──────────────────────────────────────────────────
-    try:
-        _emit({"type": "progress", "message": "Claiming queue item…"})
-        _post(f"{api_url}/queue/{queue_item_id}/claim", token, json={"device_id": device_id})
-    except Exception as e:
-        _emit({"type": "error", "message": str(e), "step": "claim"})
-        return 1
-
     # ── Download ──────────────────────────────────────────────────────────────
+    # NOTE: Desktop (useQueuePoller) already claims the item before spawning this
+    # sidecar. No second claim needed here.
     try:
         _emit({"type": "progress", "message": f"Resolving: {input_str}"})
         meta, pdf_path = download_article(input_str, cfg)
