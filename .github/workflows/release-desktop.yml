@@ -19,8 +19,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: desktop/pnpm-lock.yaml
 
       - name: Set up Rust stable
         uses: dtolnay/rust-toolchain@stable
