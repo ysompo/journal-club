@@ -1,3 +1,4 @@
+import os
 import httpx
 from fastapi import APIRouter, HTTPException
 
@@ -6,16 +7,22 @@ router = APIRouter(prefix="/desktop", tags=["desktop"])
 _GITHUB_RELEASES_URL = (
     "https://api.github.com/repos/ysompo/journal-club/releases/latest"
 )
-_GITHUB_HEADERS = {
-    "Accept": "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-}
+
+def _github_headers() -> dict:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 @router.get("/latest")
 async def get_latest_release():
     async with httpx.AsyncClient() as client:
-        resp = await client.get(_GITHUB_RELEASES_URL, headers=_GITHUB_HEADERS, timeout=10)
+        resp = await client.get(_GITHUB_RELEASES_URL, headers=_github_headers(), timeout=10)
 
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="GitHub API unavailable")
