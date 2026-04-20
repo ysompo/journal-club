@@ -20,6 +20,7 @@ debug_*.png
 vpn_*.png
 nejm_*.png
 desktop/src-tauri/target/
+desktop/src-tauri/binaries/*.exe
 backend/.env
 backend/data/
 backend/pdfs/

@@ -67,18 +67,6 @@ pub struct DownloadCmd {
 
 #[tauri::command]
 async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), String> {
-    // Resolve path to sidecar Python script (relative to the app resource dir in production,
-    // or the repo root in dev)
-    let sidecar_path = {
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .map_err(|e: tauri::Error| e.to_string())?;
-        resource_dir.join("sidecar").join("jc-download.py")
-    };
-
-    let sidecar_path_str = sidecar_path.to_string_lossy().to_string();
-
     let stdin_payload = serde_json::json!({
         "input":         cmd.input,
         "queue_item_id": cmd.queue_item_id,
@@ -95,8 +83,8 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
 
     let (mut rx, mut child) = app
         .shell()
-        .command("python3")
-        .args([&sidecar_path_str])
+        .sidecar("jc-download")
+        .map_err(|e| e.to_string())?
         .spawn()
         .map_err(|e| e.to_string())?;
 
@@ -131,6 +119,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             start_download,
             get_huji_credentials,
