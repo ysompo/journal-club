@@ -32,6 +32,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/jc-download"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "TAURI_SIGNING_PUBLIC_KEY_PLACEHOLDER",
+      "endpoints": ["https://api.labor-ai.org/desktop/latest"]
+    }
   }
 }
