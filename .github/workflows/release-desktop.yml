@@ -54,12 +54,19 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Write signing key to file
+        shell: powershell
+        run: |
+          $bytes = [System.Convert]::FromBase64String("${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}")
+          $key = [System.Text.Encoding]::UTF8.GetString($bytes)
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\tauri.key", $key)
+
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}\tauri.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
