@@ -56,10 +56,13 @@ jobs:
 
       - name: Write signing key to file
         shell: powershell
+        env:
+          SIGNING_KEY_B64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          $bytes = [System.Convert]::FromBase64String("${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}")
+          $bytes = [System.Convert]::FromBase64String($env:SIGNING_KEY_B64.Trim())
           $key = [System.Text.Encoding]::UTF8.GetString($bytes)
           [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\tauri.key", $key)
+          Write-Host "Key written, first line: $($key.Split("`n")[0])"
 
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
