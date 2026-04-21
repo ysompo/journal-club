@@ -4,6 +4,7 @@ __pycache__/
 *.html
 !templates/
 !templates/*.html
+!desktop/index.html
 *.zip
 captured_cookies.json
 .claude/
