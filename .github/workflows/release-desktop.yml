@@ -50,7 +50,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
-        working-directory: desktop
 
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
