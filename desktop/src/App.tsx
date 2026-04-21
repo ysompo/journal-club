@@ -114,7 +114,7 @@ function App() {
         />
 
         <main style={{ flex: 1, minWidth: 0, overflowY: "auto", background: "var(--color-surface, #fff)" }}>
-          {currentPage === "journals" && <JournalsPage api={api} />}
+          {currentPage === "journals" && <JournalsPage api={api} isDesktop />}
           {currentPage === "library" && <LibraryPage api={api} refreshKey={refreshKey} onSignOut={handleSignOut} />}
           {currentPage === "bookmarks" && <BookmarksPage api={api} />}
           {currentPage === "queue" && <QueuePage api={api} />}

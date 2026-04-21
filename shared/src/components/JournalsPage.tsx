@@ -5,6 +5,7 @@ import type { Journal, TocArticle, QueueItem } from "../types";
 
 interface Props {
   api: JournalClubApi;
+  isDesktop?: boolean;
 }
 
 type Scope = 1 | 3 | 6 | 12;
@@ -35,7 +36,7 @@ function saveOrder(order: string[]) {
   localStorage.setItem("jc-journal-order", JSON.stringify(order));
 }
 
-export function JournalsPage({ api }: Props) {
+export function JournalsPage({ api, isDesktop = false }: Props) {
   const [journals, setJournals] = useState<Journal[]>([]);
   const [journalStates, setJournalStates] = useState<Record<string, JournalState>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -460,6 +461,7 @@ export function JournalsPage({ api }: Props) {
                     status={getStatus(article)}
                     queuePos={getQueuePos(article)}
                     emailSelected={emailSet.has(key)}
+                    isDesktop={isDesktop}
                     onDownload={() => handleDownload(article)}
                     onCancel={() => handleCancelDownload(article)}
                     onEmail={() => toggleEmail(article)}
@@ -545,18 +547,18 @@ function JournalListItem({ journal, isSelected, isLoading, showReorder, canMoveU
 
 // ─── Article item ──────────────────────────────────────────────────────────────
 
-function ArticleItem({ article, status, queuePos, emailSelected, onDownload, onCancel, onEmail, onReport }: {
-  article: TocArticle; status: DlStatus; queuePos: number; emailSelected: boolean;
+function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDownload, onCancel, onEmail, onReport }: {
+  article: TocArticle; status: DlStatus; queuePos: number; emailSelected: boolean; isDesktop: boolean;
   onDownload: () => void; onCancel: () => void; onEmail: () => void; onReport: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   const dlLabel = () => {
-    if (status === "queued") return queuePos > 1 ? `🖥 #${queuePos}` : "🖥 Sending…";
-    if (status === "downloading") return "🖥 Loading…";
+    if (status === "queued") return isDesktop ? (queuePos > 1 ? `#${queuePos} queued` : "Queued…") : (queuePos > 1 ? `🖥 #${queuePos}` : "🖥 Sending…");
+    if (status === "downloading") return isDesktop ? "Downloading…" : "🖥 Loading…";
     if (status === "done") return "View PDF";
     if (status === "failed") return "Failed";
-    return "🖥 Send";
+    return isDesktop ? "Download" : "🖥 Send";
   };
 
   const dlColor = status === "done" ? "var(--color-success, #2E6B4F)"
