@@ -28,22 +28,23 @@ async def get_latest_release():
         raise HTTPException(status_code=502, detail="GitHub API unavailable")
 
     release = resp.json()
-    assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
+    asset_list = release.get("assets", [])
+    assets_by_name = {a["name"]: a for a in asset_list}
 
-    zip_url = next(
-        (v for k, v in assets.items() if k.endswith(".msi.zip") and not k.endswith(".sig")),
-        None,
-    )
-    sig_url = next(
-        (v for k, v in assets.items() if k.endswith(".msi.zip.sig")),
-        None,
-    )
+    msi_zip = next((a for n, a in assets_by_name.items() if n.endswith(".msi.zip") and not n.endswith(".sig")), None)
+    sig_asset = next((a for n, a in assets_by_name.items() if n.endswith(".msi.zip.sig")), None)
 
-    if not zip_url or not sig_url:
+    if not msi_zip or not sig_asset:
         raise HTTPException(status_code=404, detail="No MSI assets in latest release")
 
-    async with httpx.AsyncClient() as client:
-        sig_resp = await client.get(sig_url, timeout=10)
+    token = os.environ.get("GITHUB_TOKEN")
+    asset_headers = {"Accept": "application/octet-stream", "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        asset_headers["Authorization"] = f"Bearer {token}"
+
+    sig_api_url = f"https://api.github.com/repos/ysompo/journal-club/releases/assets/{sig_asset['id']}"
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        sig_resp = await client.get(sig_api_url, headers=asset_headers, timeout=10)
 
     return {
         "version": release["tag_name"].lstrip("v"),
@@ -52,7 +53,7 @@ async def get_latest_release():
         "platforms": {
             "windows-x86_64": {
                 "signature": sig_resp.text,
-                "url": zip_url,
+                "url": msi_zip["browser_download_url"],
             }
         },
     }
