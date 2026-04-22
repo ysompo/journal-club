@@ -39,6 +39,7 @@ jobs:
       - name: Build Python sidecar
         run: |
           pip install pyinstaller -r desktop/src-tauri/sidecar/requirements.txt
+          playwright install chromium
           pyinstaller --onefile desktop/src-tauri/sidecar/jc-download.py `
             --name jc-download `
             --add-data "journal_club;journal_club" `
@@ -50,6 +51,7 @@ jobs:
             --hidden-import xml.etree.ElementTree `
             --hidden-import xml.etree `
             --collect-all journal_club `
+            --collect-all playwright `
             --distpath desktop/src-tauri/binaries
 
       - name: Rename sidecar to Tauri target triple
