@@ -93,7 +93,17 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
         }
       });
 
-      unlistenersRef.current.push(ul1);
+      const ul2 = await listen<string>("download-stderr", ev => {
+        console.error("[sidecar stderr]", ev.payload);
+        addMsg(`stderr: ${ev.payload}`);
+      });
+      const ul3 = await listen<string>("download-error", ev => {
+        console.error("[sidecar error]", ev.payload);
+        setActiveDownloads(prev =>
+          prev.map(d => d.queueItemId === item.id ? { ...d, status: "error", errorMsg: ev.payload } : d)
+        );
+      });
+      unlistenersRef.current.push(ul1, ul2, ul3);
 
       try {
         await invoke("start_download", {
