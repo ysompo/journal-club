@@ -8,7 +8,7 @@ import { ServerSetupScreen } from "./components/ServerSetupScreen";
 import { DownloadPanel } from "./components/DownloadPanel";
 import { HujiReauthModal } from "./components/HujiReauthModal";
 import { SettingsModal } from "./components/SettingsModal";
-import { loadStoredToken, clearToken, needsServerSetup } from "./store/auth";
+import { loadStoredToken, saveToken, clearToken, needsServerSetup } from "./store/auth";
 import { useKeychain } from "./hooks/useKeychain";
 import { useQueuePoller } from "./hooks/useQueuePoller";
 import { api } from "@jc/shared";
@@ -57,7 +57,7 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [updateAvailable, setUpdateAvailable] = useState<Update | null>(null);
-  const { creds, loaded: keychainLoaded, save: saveCreds } = useKeychain();
+  const { creds, appCreds, loaded: keychainLoaded, save: saveCreds, saveApp } = useKeychain();
 
   const onArticleReady = useCallback(() => setRefreshKey(k => k + 1), []);
 
@@ -69,15 +69,29 @@ function App() {
 
   useEffect(() => {
     if (!keychainLoaded) return;
+
     const token = loadStoredToken();
-    if (!token) {
-      setAppState("unauthenticated");
-    } else if (!creds.email || !creds.password) {
-      setAppState("needs-huji");
-    } else {
-      setAppState("authenticated");
+    if (token) {
+      // Valid session token still in localStorage
+      setAppState(!creds.email || !creds.password ? "needs-huji" : "authenticated");
+      return;
     }
-  }, [keychainLoaded, creds.email, creds.password]);
+
+    if (appCreds.username && appCreds.password) {
+      // Auto-login with stored credentials
+      api.login(appCreds.username, appCreds.password)
+        .then(res => {
+          saveToken(res.access_token, res.user_id);
+          setAppState(!creds.email || !creds.password ? "needs-huji" : "authenticated");
+        })
+        .catch(() => {
+          // Stored credentials no longer valid — show login screen
+          setAppState("unauthenticated");
+        });
+    } else {
+      setAppState("unauthenticated");
+    }
+  }, [keychainLoaded, appCreds.username, appCreds.password, creds.email, creds.password]);
 
   useEffect(() => {
     if (appState !== "authenticated") return;
@@ -103,9 +117,10 @@ function App() {
   if (appState === "unauthenticated") {
     return (
       <LoginScreen
-        onSuccess={() =>
-          setAppState(!creds.email || !creds.password ? "needs-huji" : "authenticated")
-        }
+        onSuccess={(username, password) => {
+          saveApp(username, password);
+          setAppState(!creds.email || !creds.password ? "needs-huji" : "authenticated");
+        }}
       />
     );
   }

@@ -50,6 +50,7 @@ jobs:
             --hidden-import lxml `
             --hidden-import xml.etree.ElementTree `
             --hidden-import xml.etree `
+            --hidden-import sqlite3 `
             --collect-all journal_club `
             --collect-all playwright `
             --distpath desktop/src-tauri/binaries

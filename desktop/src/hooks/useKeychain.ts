@@ -8,21 +8,27 @@ export interface HujiCreds {
   chromePath: string; // not stored in keychain — read from env or hardcoded
 }
 
-const EMPTY: HujiCreds = { email: "", password: "", chromeProfile: "", chromePath: "" };
+export interface AppCreds {
+  username: string;
+  password: string;
+}
+
+const EMPTY_HUJI: HujiCreds = { email: "", password: "", chromeProfile: "", chromePath: "" };
+const EMPTY_APP: AppCreds = { username: "", password: "" };
 
 export function useKeychain() {
-  const [creds, setCreds] = useState<HujiCreds>(EMPTY);
+  const [creds, setCreds] = useState<HujiCreds>(EMPTY_HUJI);
+  const [appCreds, setAppCreds] = useState<AppCreds>(EMPTY_APP);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    invoke<[string, string, string]>("get_huji_credentials")
-      .then(([email, password, chromeProfile]) => {
-        setCreds({ email, password, chromeProfile, chromePath: "" });
-      })
-      .catch(() => {
-        // No keychain entry yet — first run
-      })
-      .finally(() => setLoaded(true));
+    Promise.all([
+      invoke<[string, string, string]>("get_huji_credentials").catch(() => ["", "", ""] as [string, string, string]),
+      invoke<[string, string]>("get_app_credentials").catch(() => ["", ""] as [string, string]),
+    ]).then(([[email, password, chromeProfile], [username, appPassword]]) => {
+      setCreds({ email, password, chromeProfile, chromePath: "" });
+      setAppCreds({ username, password: appPassword });
+    }).finally(() => setLoaded(true));
   }, []);
 
   const save = useCallback(async (email: string, password: string, chromeProfile: string) => {
@@ -30,10 +36,15 @@ export function useKeychain() {
     setCreds((prev) => ({ ...prev, email, password, chromeProfile }));
   }, []);
 
-  const clear = useCallback(async () => {
-    await invoke("clear_huji_credentials");
-    setCreds(EMPTY);
+  const saveApp = useCallback(async (username: string, password: string) => {
+    await invoke("save_app_credentials", { username, password });
+    setAppCreds({ username, password });
   }, []);
 
-  return { creds, loaded, save, clear };
+  const clear = useCallback(async () => {
+    await invoke("clear_huji_credentials");
+    setCreds(EMPTY_HUJI);
+  }, []);
+
+  return { creds, appCreds, loaded, save, saveApp, clear };
 }

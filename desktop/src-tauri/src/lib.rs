@@ -7,6 +7,8 @@ const KEYRING_SERVICE: &str = "com.ysomp.journal-club";
 const KEYRING_USER_EMAIL: &str = "huji_email";
 const KEYRING_USER_PASSWORD: &str = "huji_password";
 const KEYRING_CHROME_PROFILE: &str = "chrome_profile";
+const KEYRING_APP_USERNAME: &str = "app_username";
+const KEYRING_APP_PASSWORD: &str = "app_password";
 
 #[tauri::command]
 fn get_huji_credentials() -> Result<(String, String, String), String> {
@@ -38,6 +40,32 @@ fn save_huji_credentials(email: String, password: String, chrome_profile: String
     Entry::new(KEYRING_SERVICE, KEYRING_CHROME_PROFILE)
         .map_err(|e| e.to_string())?
         .set_password(&chrome_profile)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_app_credentials() -> Result<(String, String), String> {
+    let username = Entry::new(KEYRING_SERVICE, KEYRING_APP_USERNAME)
+        .map_err(|e| e.to_string())?
+        .get_password()
+        .unwrap_or_default();
+    let password = Entry::new(KEYRING_SERVICE, KEYRING_APP_PASSWORD)
+        .map_err(|e| e.to_string())?
+        .get_password()
+        .unwrap_or_default();
+    Ok((username, password))
+}
+
+#[tauri::command]
+fn save_app_credentials(username: String, password: String) -> Result<(), String> {
+    Entry::new(KEYRING_SERVICE, KEYRING_APP_USERNAME)
+        .map_err(|e| e.to_string())?
+        .set_password(&username)
+        .map_err(|e| e.to_string())?;
+    Entry::new(KEYRING_SERVICE, KEYRING_APP_PASSWORD)
+        .map_err(|e| e.to_string())?
+        .set_password(&password)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -125,6 +153,8 @@ pub fn run() {
             get_huji_credentials,
             save_huji_credentials,
             clear_huji_credentials,
+            get_app_credentials,
+            save_app_credentials,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

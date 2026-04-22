@@ -5,7 +5,7 @@ import { saveToken } from "../store/auth";
 type Mode = "login" | "register";
 
 interface Props {
-  onSuccess: (userId: string) => void;
+  onSuccess: (username: string, password: string) => void;
 }
 
 export function LoginScreen({ onSuccess }: Props) {
@@ -27,7 +27,7 @@ export function LoginScreen({ onSuccess }: Props) {
           ? await api.login(hujiUsername, password)
           : await api.register(hujiUsername, displayName, password, inviteCode.trim() || undefined);
       saveToken(res.access_token, res.user_id);
-      onSuccess(res.user_id);
+      onSuccess(hujiUsername, password);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
     } finally {
