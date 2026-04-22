@@ -47,6 +47,9 @@ jobs:
             --hidden-import selenium `
             --hidden-import bs4 `
             --hidden-import lxml `
+            --hidden-import xml.etree.ElementTree `
+            --hidden-import xml.etree `
+            --collect-all journal_club `
             --distpath desktop/src-tauri/binaries
 
       - name: Rename sidecar to Tauri target triple
