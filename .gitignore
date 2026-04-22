@@ -23,6 +23,7 @@ nejm_*.png
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/*.exe
 backend/.env
+config.yaml
 backend/data/
 backend/pdfs/
 pwa/.next/
