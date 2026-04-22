@@ -38,6 +38,10 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "..", "..", ".."))
 sys.path.insert(0, _REPO_ROOT)
 
+# ── When frozen by PyInstaller, point Playwright to bundled browsers ──────────
+if getattr(sys, "frozen", False):
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(sys._MEIPASS, "pw-browsers")
+
 import requests as _req
 from journal_club.config import Config
 from journal_club.resolver import resolve

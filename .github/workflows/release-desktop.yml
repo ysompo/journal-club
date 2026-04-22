@@ -39,11 +39,13 @@ jobs:
       - name: Build Python sidecar
         run: |
           pip install pyinstaller -r desktop/src-tauri/sidecar/requirements.txt
+          $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\pw-browsers"
           playwright install chromium
           pyinstaller --onefile desktop/src-tauri/sidecar/jc-download.py `
             --name jc-download `
             --add-data "journal_club;journal_club" `
             --add-data "download.py;." `
+            --add-data "pw-browsers;pw-browsers" `
             --hidden-import yaml `
             --hidden-import selenium `
             --hidden-import bs4 `

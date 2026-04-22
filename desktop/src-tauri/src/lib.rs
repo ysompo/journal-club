@@ -1,83 +1,75 @@
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri::{Emitter, Manager};
-use keyring::Entry;
+use std::path::PathBuf;
 
-const KEYRING_SERVICE: &str = "com.ysomp.journal-club";
-const KEYRING_USER_EMAIL: &str = "huji_email";
-const KEYRING_USER_PASSWORD: &str = "huji_password";
-const KEYRING_CHROME_PROFILE: &str = "chrome_profile";
-const KEYRING_APP_USERNAME: &str = "app_username";
-const KEYRING_APP_PASSWORD: &str = "app_password";
-
-#[tauri::command]
-fn get_huji_credentials() -> Result<(String, String, String), String> {
-    let email = Entry::new(KEYRING_SERVICE, KEYRING_USER_EMAIL)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    let password = Entry::new(KEYRING_SERVICE, KEYRING_USER_PASSWORD)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    let chrome_profile = Entry::new(KEYRING_SERVICE, KEYRING_CHROME_PROFILE)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    Ok((email, password, chrome_profile))
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+struct StoredCreds {
+    huji_email: String,
+    huji_password: String,
+    chrome_profile: String,
+    app_username: String,
+    app_password: String,
 }
 
-#[tauri::command]
-fn save_huji_credentials(email: String, password: String, chrome_profile: String) -> Result<(), String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_EMAIL)
-        .map_err(|e| e.to_string())?
-        .set_password(&email)
-        .map_err(|e| e.to_string())?;
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_PASSWORD)
-        .map_err(|e| e.to_string())?
-        .set_password(&password)
-        .map_err(|e| e.to_string())?;
-    Entry::new(KEYRING_SERVICE, KEYRING_CHROME_PROFILE)
-        .map_err(|e| e.to_string())?
-        .set_password(&chrome_profile)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+fn creds_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("credentials.json"))
+        .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn get_app_credentials() -> Result<(String, String), String> {
-    let username = Entry::new(KEYRING_SERVICE, KEYRING_APP_USERNAME)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    let password = Entry::new(KEYRING_SERVICE, KEYRING_APP_PASSWORD)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    Ok((username, password))
+fn load_stored_creds(app: &tauri::AppHandle) -> StoredCreds {
+    let Ok(path) = creds_path(app) else { return StoredCreds::default(); };
+    let Ok(data) = std::fs::read_to_string(&path) else { return StoredCreds::default(); };
+    serde_json::from_str(&data).unwrap_or_default()
 }
 
-#[tauri::command]
-fn save_app_credentials(username: String, password: String) -> Result<(), String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_APP_USERNAME)
-        .map_err(|e| e.to_string())?
-        .set_password(&username)
-        .map_err(|e| e.to_string())?;
-    Entry::new(KEYRING_SERVICE, KEYRING_APP_PASSWORD)
-        .map_err(|e| e.to_string())?
-        .set_password(&password)
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn clear_huji_credentials() -> Result<(), String> {
-    for key in &[KEYRING_USER_EMAIL, KEYRING_USER_PASSWORD, KEYRING_CHROME_PROFILE] {
-        let _ = Entry::new(KEYRING_SERVICE, key)
-            .map_err(|e| e.to_string())?
-            .delete_credential();
+fn write_stored_creds(app: &tauri::AppHandle, creds: &StoredCreds) -> Result<(), String> {
+    let path = creds_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    Ok(())
+    let data = serde_json::to_string(creds).map_err(|e| e.to_string())?;
+    std::fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_huji_credentials(app: tauri::AppHandle) -> Result<(String, String, String), String> {
+    let c = load_stored_creds(&app);
+    Ok((c.huji_email, c.huji_password, c.chrome_profile))
+}
+
+#[tauri::command]
+fn save_huji_credentials(app: tauri::AppHandle, email: String, password: String, chrome_profile: String) -> Result<(), String> {
+    let mut c = load_stored_creds(&app);
+    c.huji_email = email;
+    c.huji_password = password;
+    c.chrome_profile = chrome_profile;
+    write_stored_creds(&app, &c)
+}
+
+#[tauri::command]
+fn get_app_credentials(app: tauri::AppHandle) -> Result<(String, String), String> {
+    let c = load_stored_creds(&app);
+    Ok((c.app_username, c.app_password))
+}
+
+#[tauri::command]
+fn save_app_credentials(app: tauri::AppHandle, username: String, password: String) -> Result<(), String> {
+    let mut c = load_stored_creds(&app);
+    c.app_username = username;
+    c.app_password = password;
+    write_stored_creds(&app, &c)
+}
+
+#[tauri::command]
+fn clear_huji_credentials(app: tauri::AppHandle) -> Result<(), String> {
+    let mut c = load_stored_creds(&app);
+    c.huji_email = String::new();
+    c.huji_password = String::new();
+    c.chrome_profile = String::new();
+    write_stored_creds(&app, &c)
 }
 
 #[derive(serde::Deserialize)]
