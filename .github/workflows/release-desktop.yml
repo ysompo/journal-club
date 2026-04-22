@@ -43,6 +43,10 @@ jobs:
             --name jc-download `
             --add-data "journal_club;journal_club" `
             --add-data "download.py;." `
+            --hidden-import yaml `
+            --hidden-import selenium `
+            --hidden-import bs4 `
+            --hidden-import lxml `
             --distpath desktop/src-tauri/binaries
 
       - name: Rename sidecar to Tauri target triple
