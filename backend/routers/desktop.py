@@ -74,23 +74,19 @@ async def download_update(version: str):
         raise HTTPException(status_code=404, detail="Version not found")
 
     asset_api_url = f"https://api.github.com/repos/ysompo/journal-club/releases/assets/{msi_zip['id']}"
-    client = httpx.AsyncClient(follow_redirects=True)
-    req = client.build_request("GET", asset_api_url, headers=_asset_headers())
-    resp = await client.send(req, stream=True)
 
-    if resp.status_code != 200:
-        await resp.aclose()
-        await client.aclose()
-        raise HTTPException(status_code=502, detail="Failed to fetch asset from GitHub")
-
-    async def stream():
-        async with resp, client:
-            async for chunk in resp.aiter_bytes(chunk_size=65536):
-                yield chunk
+    async def stream_from_github():
+        async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
+            async with client.stream("GET", asset_api_url, headers=_asset_headers()) as resp:
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
 
     filename = msi_zip["name"]
     return StreamingResponse(
-        stream(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        stream_from_github(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(msi_zip["size"]),
+        },
     )
