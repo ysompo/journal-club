@@ -135,7 +135,20 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                     let _ = app.emit("download-error", e);
                     break;
                 }
-                CommandEvent::Terminated(_) => break,
+                CommandEvent::Terminated(payload) => {
+                    if payload.code != Some(0) {
+                        let msg = serde_json::json!({
+                            "type": "error",
+                            "message": format!(
+                                "Sidecar exited unexpectedly (code {:?}). Check stderr output above.",
+                                payload.code
+                            ),
+                            "step": "process"
+                        });
+                        let _ = app.emit("download-progress", msg.to_string());
+                    }
+                    break;
+                }
                 _ => {}
             }
         }

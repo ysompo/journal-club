@@ -60,6 +60,14 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
           )
         );
 
+      // These unlisten functions are called as soon as this download finishes/errors
+      // so they don't accumulate across multiple downloads in a session.
+      let unlistenThisDownload: UnlistenFn[] = [];
+      const cleanupListeners = () => {
+        unlistenThisDownload.forEach(fn => fn());
+        unlistenThisDownload = [];
+      };
+
       const ul1 = await listen<string>("download-progress", ev => {
         try {
           const parsed = JSON.parse(ev.payload);
@@ -70,6 +78,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
               prev.map(d => d.queueItemId === item.id ? { ...d, status: "done" } : d)
             );
             onArticleReady();
+            cleanupListeners();
             // Remove after 3s
             setTimeout(() =>
               setActiveDownloads(prev => prev.filter(d => d.queueItemId !== item.id)),
@@ -87,6 +96,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
             if (AUTH_ERROR_RE.test(parsed.message ?? "")) {
               setNeedsReauth(true);
             }
+            cleanupListeners();
           }
         } catch {
           addMsg(ev.payload);
@@ -95,15 +105,17 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
 
       const ul2 = await listen<string>("download-stderr", ev => {
         console.error("[sidecar stderr]", ev.payload);
-        addMsg(`stderr: ${ev.payload}`);
+        addMsg(`[err] ${ev.payload}`);
       });
       const ul3 = await listen<string>("download-error", ev => {
         console.error("[sidecar error]", ev.payload);
         setActiveDownloads(prev =>
           prev.map(d => d.queueItemId === item.id ? { ...d, status: "error", errorMsg: ev.payload } : d)
         );
+        cleanupListeners();
       });
-      unlistenersRef.current.push(ul1, ul2, ul3);
+      unlistenThisDownload = [ul1, ul2, ul3];
+      unlistenersRef.current.push(...unlistenThisDownload);
 
       try {
         await invoke("start_download", {
