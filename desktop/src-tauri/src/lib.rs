@@ -87,6 +87,15 @@ pub struct DownloadCmd {
 
 #[tauri::command]
 async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), String> {
+    // Persistent per-user Playwright browser cache. Survives app updates so
+    // Chromium is only downloaded on first run.
+    let browsers_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("browsers");
+    std::fs::create_dir_all(&browsers_dir).map_err(|e| e.to_string())?;
+
     let stdin_payload = serde_json::json!({
         "input":         cmd.input,
         "queue_item_id": cmd.queue_item_id,
@@ -98,6 +107,7 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
         "chrome_profile": cmd.chrome_profile,
         "chrome_path":   cmd.chrome_path,
         "output_dir":    std::env::temp_dir().join("jc_downloads").to_string_lossy(),
+        "browsers_dir":  browsers_dir.to_string_lossy(),
     });
     let stdin_bytes = serde_json::to_vec(&stdin_payload).map_err(|e| e.to_string())?;
 

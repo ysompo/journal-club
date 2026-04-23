@@ -37,15 +37,17 @@ jobs:
           python-version: "3.11"
 
       - name: Build Python sidecar
+        # Chromium itself is NOT bundled in the sidecar exe (would bloat it to
+        # ~200 MB). Instead the sidecar downloads Chromium on first run into a
+        # persistent per-user cache (%APPDATA%\com.ysomp.journal-club\browsers).
+        # --collect-all playwright still ships the node driver so the install
+        # command can run offline-of-Python's-own-CLI.
         run: |
           pip install pyinstaller -r desktop/src-tauri/sidecar/requirements.txt
-          $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\pw-browsers"
-          playwright install chromium
           pyinstaller --onefile desktop/src-tauri/sidecar/jc-download.py `
             --name jc-download `
             --add-data "journal_club;journal_club" `
             --add-data "download.py;." `
-            --add-data "pw-browsers;pw-browsers" `
             --hidden-import yaml `
             --hidden-import selenium `
             --hidden-import bs4 `
