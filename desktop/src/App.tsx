@@ -167,7 +167,13 @@ function App() {
         onReport={report}
       />
 
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          hujiEmail={creds.email}
+          onSaveHuji={(email, password) => saveCreds(email, password, creds.chromeProfile)}
+        />
+      )}
 
       {needsReauth && (
         <HujiReauthModal

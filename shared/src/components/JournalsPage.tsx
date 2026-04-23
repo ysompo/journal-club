@@ -181,9 +181,9 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
         abstract: article.abstract, url: article.url,
       }).catch(() => {});
       refreshQueue();
-      showHint("Sent to desktop for download");
+      showHint(isDesktop ? "Added to download queue" : "Sent to desktop for download");
     } catch {
-      showHint("Could not send to desktop — please try again.", "error");
+      showHint(isDesktop ? "Could not queue download — please try again." : "Could not send to desktop — please try again.", "error");
     }
   };
 
@@ -223,7 +223,13 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
 
   const handleReport = async (article: TocArticle) => {
     const item = matchQueue(article, queueRef.current);
-    if (item) await api.reportFailure(item.id);
+    if (!item) return;
+    try {
+      await api.reportFailure(item.id);
+      showHint("Report sent");
+    } catch {
+      showHint("Could not send report — item may have been removed.", "error");
+    }
   };
 
   const getStatus = (article: TocArticle): DlStatus => {

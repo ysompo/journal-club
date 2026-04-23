@@ -52,6 +52,15 @@ async def list_queue(
     user=Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
 ):
+    # Release stale claims on every poll so crashed sidecars don't block forever.
+    stale_before = (datetime.now(timezone.utc) - timedelta(seconds=CLAIM_TIMEOUT_SECONDS)).isoformat()
+    await db.execute(
+        "UPDATE queue SET status='queued', claimed_by=NULL, claimed_at=NULL "
+        "WHERE user_id=? AND status='claimed' AND claimed_at<?",
+        (user["id"], stale_before),
+    )
+    await db.commit()
+
     if status:
         async with db.execute(
             "SELECT * FROM queue WHERE user_id=? AND status=? ORDER BY created_at ASC",

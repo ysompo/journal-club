@@ -15,6 +15,8 @@ type UpdateStatus =
 
 interface Props {
   onClose: () => void;
+  hujiEmail: string;
+  onSaveHuji: (email: string, password: string) => Promise<void>;
 }
 
 type Theme = "light" | "dark" | "system";
@@ -31,7 +33,7 @@ const btnStyle = (active: boolean): React.CSSProperties => ({
   cursor: "pointer",
 });
 
-export function SettingsModal({ onClose }: Props) {
+export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
   const [theme, setTheme] = useState<Theme>("system");
   const [fontSize, setFontSize] = useState<FontSize>("medium");
   const [emails, setEmails] = useState<string[]>([]);
@@ -43,6 +45,29 @@ export function SettingsModal({ onClose }: Props) {
   const [urlSaved, setUrlSaved] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: "idle" });
+
+  const [hujiEmailEdit, setHujiEmailEdit] = useState(hujiEmail);
+  const [hujiPassword, setHujiPassword] = useState("");
+  const [hujiSaving, setHujiSaving] = useState(false);
+  const [hujiSaved, setHujiSaved] = useState(false);
+  const [hujiError, setHujiError] = useState<string | null>(null);
+
+  async function saveHuji(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hujiEmailEdit.trim() || !hujiPassword) return;
+    setHujiSaving(true);
+    setHujiError(null);
+    try {
+      await onSaveHuji(hujiEmailEdit.trim(), hujiPassword);
+      setHujiPassword("");
+      setHujiSaved(true);
+      setTimeout(() => setHujiSaved(false), 2500);
+    } catch (err) {
+      setHujiError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setHujiSaving(false);
+    }
+  }
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -190,6 +215,41 @@ export function SettingsModal({ onClose }: Props) {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* HUJI library credentials */}
+            <div>
+              <span style={label}>HUJI library credentials</span>
+              <form onSubmit={saveHuji} style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                <input
+                  type="email"
+                  value={hujiEmailEdit}
+                  onChange={e => setHujiEmailEdit(e.target.value)}
+                  placeholder="username@mail.huji.ac.il"
+                  required
+                  style={{ padding: "0.35rem 0.625rem", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius)", background: "var(--color-surface-container)", color: "var(--color-on-surface)", fontFamily: "var(--font-body)", fontSize: "0.8rem", outline: "none" }}
+                />
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="password"
+                    value={hujiPassword}
+                    onChange={e => setHujiPassword(e.target.value)}
+                    placeholder="New password"
+                    style={{ flex: 1, padding: "0.35rem 0.625rem", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius)", background: "var(--color-surface-container)", color: "var(--color-on-surface)", fontFamily: "var(--font-body)", fontSize: "0.8rem", outline: "none" }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={hujiSaving || !hujiPassword || !hujiEmailEdit.trim()}
+                    style={{ ...btnStyle(false), flexShrink: 0, opacity: (!hujiPassword || !hujiEmailEdit.trim()) ? 0.5 : 1 }}
+                  >
+                    {hujiSaving ? "Saving…" : hujiSaved ? "Saved!" : "Update"}
+                  </button>
+                </div>
+                {hujiError && <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-error)" }}>{hujiError}</p>}
+                <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--color-on-surface-variant)" }}>
+                  Used only to fetch PDFs through the HUJI library proxy. Stored locally, never sent to the server.
+                </p>
+              </form>
             </div>
 
             {/* Server URL */}

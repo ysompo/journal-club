@@ -49,7 +49,7 @@ jobs:
             --add-data "journal_club;journal_club" `
             --add-data "download.py;." `
             --hidden-import yaml `
-            --hidden-import selenium `
+            --hidden-import httpx `
             --hidden-import bs4 `
             --hidden-import lxml `
             --hidden-import xml.etree.ElementTree `
