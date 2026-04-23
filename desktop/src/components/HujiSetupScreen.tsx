@@ -7,7 +7,6 @@ interface Props {
 export function HujiSetupScreen({ onSave }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [chromeProfile, setChromeProfile] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,7 +15,7 @@ export function HujiSetupScreen({ onSave }: Props) {
     setLoading(true);
     setError(null);
     try {
-      await onSave(email, password, chromeProfile);
+      await onSave(email, password, "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save credentials");
     } finally {
@@ -39,7 +38,7 @@ export function HujiSetupScreen({ onSave }: Props) {
             textAlign: "center",
           }}
         >
-          HUJI credentials
+          HUJI library credentials
         </h1>
         <p
           style={{
@@ -47,9 +46,13 @@ export function HujiSetupScreen({ onSave }: Props) {
             textAlign: "center",
             fontSize: "0.875rem",
             marginBottom: "1.5rem",
+            lineHeight: 1.5,
           }}
         >
-          Stored securely in your OS keychain — never sent to the server.
+          Your university SSO login — used only to fetch PDFs through the library
+          proxy. Stored locally on this device, never sent to the Journal Club server.
+          <br />
+          <em style={{ fontSize: "0.8rem" }}>Not your Journal Club account password.</em>
         </p>
 
         <div
@@ -82,19 +85,6 @@ export function HujiSetupScreen({ onSave }: Props) {
                 placeholder="••••••••"
                 style={inputStyle}
               />
-            </Field>
-
-            <Field label="Chrome profile path (for downloading)">
-              <input
-                type="text"
-                value={chromeProfile}
-                onChange={(e) => setChromeProfile(e.target.value)}
-                placeholder="C:\Users\you\AppData\Local\Google\Chrome\User Data\Default"
-                style={inputStyle}
-              />
-              <p style={{ margin: "0.25rem 0 0", fontSize: "0.75rem", color: "var(--color-on-surface-variant)" }}>
-                Leave blank to use a temporary profile.
-              </p>
             </Field>
 
             {error && (

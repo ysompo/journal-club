@@ -10,7 +10,6 @@ interface Props {
 export function HujiReauthModal({ currentEmail, currentChromeProfile, onSave, onDismiss }: Props) {
   const [email, setEmail] = useState(currentEmail);
   const [password, setPassword] = useState("");
-  const [chromeProfile, setChromeProfile] = useState(currentChromeProfile);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,7 +19,7 @@ export function HujiReauthModal({ currentEmail, currentChromeProfile, onSave, on
     setSaving(true);
     setError(null);
     try {
-      await onSave(email.trim(), password, chromeProfile.trim());
+      await onSave(email.trim(), password, currentChromeProfile);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save credentials");
       setSaving(false);
@@ -66,10 +65,6 @@ export function HujiReauthModal({ currentEmail, currentChromeProfile, onSave, on
           <div>
             <label style={labelStyle}>Password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} placeholder="Enter your HUJI password" />
-          </div>
-          <div>
-            <label style={labelStyle}>Chrome profile path (optional)</label>
-            <input type="text" value={chromeProfile} onChange={e => setChromeProfile(e.target.value)} style={inputStyle} placeholder="e.g. C:\Users\you\AppData\Local\Google\Chrome\User Data\Default" />
           </div>
 
           {error && <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-error)" }}>{error}</p>}

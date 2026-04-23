@@ -1,8 +1,17 @@
 import { useState, useEffect } from "react";
 import { api } from "@jc/shared";
+import { getVersion } from "@tauri-apps/api/app";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { getApiUrl, saveApiUrl } from "../store/auth";
 
-const APP_VERSION = "0.1.0";
+type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "up-to-date" }
+  | { state: "available"; version: string; install: () => Promise<void> }
+  | { state: "installing" }
+  | { state: "error"; message: string };
 
 interface Props {
   onClose: () => void;
@@ -32,6 +41,8 @@ export function SettingsModal({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState(getApiUrl());
   const [urlSaved, setUrlSaved] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: "idle" });
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -40,7 +51,34 @@ export function SettingsModal({ onClose }: Props) {
       setEmails(s.email_addresses);
       setLoading(false);
     }).catch(() => setLoading(false));
+    getVersion().then(setAppVersion).catch(() => setAppVersion("?"));
   }, []);
+
+  async function checkForUpdates() {
+    setUpdateStatus({ state: "checking" });
+    try {
+      const update = await check();
+      if (update?.available) {
+        setUpdateStatus({
+          state: "available",
+          version: update.version,
+          install: async () => {
+            setUpdateStatus({ state: "installing" });
+            try {
+              await update.downloadAndInstall();
+              await relaunch();
+            } catch (e) {
+              setUpdateStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
+            }
+          },
+        });
+      } else {
+        setUpdateStatus({ state: "up-to-date" });
+      }
+    } catch (e) {
+      setUpdateStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -70,10 +108,19 @@ export function SettingsModal({ onClose }: Props) {
     display: "block",
   };
 
+  // Guard against dismissing the modal during an in-flight update install —
+  // `downloadAndInstall` is not cancellable and `relaunch` will fire even if
+  // the modal unmounts, leaving the user with no progress indicator.
+  const isInstalling = updateStatus.state === "installing";
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (isInstalling) return;
+    if (e.target === e.currentTarget) onClose();
+  };
+
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={handleBackdropClick}
     >
       <div style={{ background: "var(--color-surface-container-lowest)", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius-lg)", padding: "1.5rem", width: "100%", maxWidth: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
         <h2 style={{ fontFamily: "var(--font-headline)", fontSize: "1.25rem", color: "var(--color-on-surface)", margin: "0 0 1.25rem" }}>
@@ -170,19 +217,37 @@ export function SettingsModal({ onClose }: Props) {
             {error && <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-error)" }}>{error}</p>}
 
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "0.25rem" }}>
-              <button onClick={onClose} style={btnStyle(false)}>Cancel</button>
+              <button onClick={onClose} disabled={isInstalling} style={{ ...btnStyle(false), opacity: isInstalling ? 0.5 : 1 }}>Cancel</button>
               <button
                 onClick={save}
-                disabled={saving}
-                style={{ ...btnStyle(true), opacity: saving ? 0.6 : 1 }}
+                disabled={saving || isInstalling}
+                style={{ ...btnStyle(true), opacity: saving || isInstalling ? 0.6 : 1 }}
               >
                 {saving ? "Saving…" : "Save"}
               </button>
             </div>
 
-            <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--color-on-surface-variant)", borderTop: "1px solid var(--color-outline-variant)", paddingTop: "0.75rem" }}>
-              Journal Club v{APP_VERSION}
-            </p>
+            <div style={{ borderTop: "1px solid var(--color-outline-variant)", paddingTop: "0.75rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+              <div style={{ fontSize: "0.7rem", color: "var(--color-on-surface-variant)", lineHeight: 1.5 }}>
+                <div>Journal Club v{appVersion || "…"}</div>
+                {updateStatus.state === "up-to-date" && <div style={{ color: "var(--color-on-surface-variant)" }}>You're up to date.</div>}
+                {updateStatus.state === "available" && <div style={{ color: "var(--color-primary)" }}>v{updateStatus.version} is available.</div>}
+                {updateStatus.state === "error" && <div style={{ color: "var(--color-error)" }}>{updateStatus.message}</div>}
+              </div>
+              {updateStatus.state === "available" ? (
+                <button onClick={() => updateStatus.install()} style={btnStyle(true)}>
+                  Install & relaunch
+                </button>
+              ) : (
+                <button
+                  onClick={checkForUpdates}
+                  disabled={updateStatus.state === "checking" || updateStatus.state === "installing"}
+                  style={btnStyle(false)}
+                >
+                  {updateStatus.state === "checking" ? "Checking…" : updateStatus.state === "installing" ? "Installing…" : "Check for updates"}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
