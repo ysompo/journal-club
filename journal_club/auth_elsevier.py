@@ -63,10 +63,29 @@ def _select_huji(page: Page) -> None:
     print("   [Elsevier] Could not find HUJI in results")
 
 
+_HUJI_ENTITY_ID = "https://idp.huji.ac.il/idp/shibboleth"
+
+
+def _build_sd_institution_login(article_url: str) -> str:
+    """Build ScienceDirect institutional-login URL that forces Shibboleth redirect.
+
+    Navigating here bypasses the need to find/click "Access through Hebrew
+    University" buttons that are sometimes hidden or A/B-tested away.
+    """
+    from urllib.parse import quote
+    return (
+        "https://www.sciencedirect.com/user/institution/login"
+        f"?entityID={quote(_HUJI_ENTITY_ID, safe='')}"
+        f"&returnURL={quote(article_url, safe='')}"
+    )
+
+
 def authenticate_elsevier(page: Page, article_url: str, email: str, password: str,
                            captured: list, output_dir: str = None):
     """Elsevier/ScienceDirect auth flow."""
     print(f"\n[Elsevier Auth] Article: {article_url[:60]}")
+
+    # Navigate to the article page — Strategies 1-3 below handle auth from there.
     page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     try:
         page.wait_for_load_state("networkidle", timeout=8000)

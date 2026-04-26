@@ -1,7 +1,14 @@
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandEvent, CommandChild};
 use tauri::{Emitter, Manager};
 use std::path::PathBuf;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+fn download_children() -> &'static Mutex<HashMap<String, CommandChild>> {
+    static CHILDREN: OnceLock<Mutex<HashMap<String, CommandChild>>> = OnceLock::new();
+    CHILDREN.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 struct StoredCreds {
@@ -86,6 +93,18 @@ pub struct DownloadCmd {
 }
 
 #[tauri::command]
+fn cancel_download(queue_item_id: String) -> Result<(), String> {
+    let child_opt = {
+        let mut map = download_children().lock().map_err(|e| e.to_string())?;
+        map.remove(&queue_item_id)
+    };
+    if let Some(child) = child_opt {
+        child.kill().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), String> {
     // Persistent per-user Playwright browser cache. Survives app updates so
     // Chromium is only downloaded on first run.
@@ -109,7 +128,10 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
         "output_dir":    std::env::temp_dir().join("jc_downloads").to_string_lossy(),
         "browsers_dir":  browsers_dir.to_string_lossy(),
     });
-    let stdin_bytes = serde_json::to_vec(&stdin_payload).map_err(|e| e.to_string())?;
+    // Append newline so the sidecar (which uses readline()) unblocks immediately.
+    // tauri-plugin-shell's CommandChild has no close_stdin(), so we can't signal EOF.
+    let mut stdin_bytes = serde_json::to_vec(&stdin_payload).map_err(|e| e.to_string())?;
+    stdin_bytes.push(b'\n');
 
     let (mut rx, mut child) = app
         .shell()
@@ -121,8 +143,17 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
     // Write JSON config to stdin then close it
     child.write(&stdin_bytes).map_err(|e| e.to_string())?;
 
+    // Register child so cancel_download can kill it
+    let queue_item_id = cmd.queue_item_id.clone();
+    if let Ok(mut map) = download_children().lock() {
+        map.insert(queue_item_id.clone(), child);
+    }
+
     // Stream stdout lines as Tauri events to the frontend
+    let app_for_task = app.clone();
+    let qid = queue_item_id.clone();
     tauri::async_runtime::spawn(async move {
+        let app = app_for_task;
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
@@ -152,6 +183,10 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                 _ => {}
             }
         }
+        // Remove from registry once the process has exited
+        if let Ok(mut map) = download_children().lock() {
+            map.remove(&qid);
+        }
     });
 
     Ok(())
@@ -165,6 +200,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             start_download,
+            cancel_download,
             get_huji_credentials,
             save_huji_credentials,
             clear_huji_credentials,

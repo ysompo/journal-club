@@ -9,7 +9,7 @@ from routers.users import get_current_user
 router = APIRouter(prefix="/queue", tags=["queue"])
 
 CLAIM_TIMEOUT_SECONDS = 300  # 5 min — auto-release stale claims
-MAX_RETRIES = 5
+MAX_RETRIES = 1
 
 
 class QueueRequest(BaseModel):
@@ -28,6 +28,7 @@ class FailedRequest(BaseModel):
     error: str
     error_step: str = ""
     publisher: str = ""
+    log_content: str = ""
 
 
 @router.post("/", status_code=201)
@@ -150,9 +151,9 @@ async def mark_failed(
     )
     failure_id = str(uuid.uuid4())
     await db.execute(
-        "INSERT INTO download_failures (id, queue_item_id, user_id, error_step, error_message, publisher, occurred_at) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (failure_id, item_id, user["id"], req.error_step, req.error, req.publisher, now),
+        "INSERT INTO download_failures (id, queue_item_id, user_id, error_step, error_message, publisher, log_content, occurred_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (failure_id, item_id, user["id"], req.error_step, req.error, req.publisher, req.log_content, now),
     )
     await db.commit()
     return {"ok": True, "retry_count": new_count}
@@ -170,6 +171,17 @@ async def retry_item(
         "WHERE id=? AND user_id=?",
         (now, item_id, user["id"]),
     )
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/active")
+async def clear_active(
+    user=Depends(get_current_user),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Delete ALL queue items for this user (called on desktop restart — full wipe)."""
+    await db.execute("DELETE FROM queue WHERE user_id=?", (user["id"],))
     await db.commit()
     return {"ok": True}
 
@@ -196,7 +208,7 @@ async def report_failure(
     from config import RESEND_API_KEY, RESEND_FROM, ADMIN_EMAIL
 
     async with db.execute(
-        "SELECT q.input, q.error, q.retry_count, df.error_step, df.publisher "
+        "SELECT q.input, q.error, q.retry_count, df.error_step, df.publisher, df.log_content "
         "FROM queue q LEFT JOIN download_failures df ON df.queue_item_id=q.id "
         "WHERE q.id=? AND q.user_id=? ORDER BY df.occurred_at DESC LIMIT 1",
         (item_id, user["id"]),
@@ -206,6 +218,15 @@ async def report_failure(
         raise HTTPException(status_code=404, detail="Queue item not found")
 
     resend.api_key = RESEND_API_KEY
+    log_section = ""
+    log_content = row["log_content"] or ""
+    if log_content:
+        # Truncate very long logs to keep email under Resend's 40KB limit
+        if len(log_content) > 30000:
+            log_content = log_content[-30000:]
+            log_section = f"\n\n── Full log (last 30KB) ──────────────────────\n{log_content}\n"
+        else:
+            log_section = f"\n\n── Full log ──────────────────────────────────\n{log_content}\n"
     body = (
         f"Download failure report\n\n"
         f"User: {user['huji_username']}\n"
@@ -214,6 +235,7 @@ async def report_failure(
         f"Step: {row['error_step'] or 'unknown'}\n"
         f"Publisher: {row['publisher'] or 'unknown'}\n"
         f"Retries: {row['retry_count']}\n"
+        f"{log_section}"
     )
     resend.Emails.send({
         "from": RESEND_FROM,

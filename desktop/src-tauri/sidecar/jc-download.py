@@ -34,6 +34,10 @@ import subprocess
 import tempfile
 import traceback
 
+# Disable Python output buffering as early as possible so a killed sidecar
+# leaves a complete log up to the last printed line.
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
+
 # ── Path setup: find the journal_club package ─────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Sidecar lives at desktop/src-tauri/sidecar/ → go up 3 to repo root
@@ -170,13 +174,62 @@ def _get_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+    def write(self, data):
+        for s in self._streams:
+            try:
+                s.write(data)
+                s.flush()
+            except Exception:
+                pass
+        return len(data) if isinstance(data, str) else 0
+    def flush(self):
+        for s in self._streams:
+            try: s.flush()
+            except Exception: pass
+
+
+_LOG_PATH: str = ""
+
+
+def _setup_log(queue_item_id: str) -> str:
+    log_dir = os.path.join(tempfile.gettempdir(), "jc_downloads", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    path = os.path.join(log_dir, f"sidecar-{queue_item_id}.log")
+    # buffering=1 → line-buffered so each newline flushes to disk immediately,
+    # so a crashed/killed sidecar still leaves a complete log up to the last line.
+    fh = open(path, "w", encoding="utf-8", errors="replace", buffering=1)
+    # Force underlying stdout/stderr to line-buffered too, so prints from the
+    # original streams flush at every newline before being teed.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+    sys.stderr = _Tee(sys.stderr, fh)
+    sys.stdout = _Tee(sys.stdout, fh)
+    return path
+
+
 def main() -> int:
-    raw = sys.stdin.read()
+    # Tauri's shell sidecar API doesn't close stdin after writing, so we'd
+    # block forever on read(). The caller appends a newline; readline() returns
+    # as soon as the JSON config arrives.
+    raw = sys.stdin.readline()
     try:
         cmd = json.loads(raw)
     except json.JSONDecodeError as e:
         _emit({"type": "error", "message": f"Invalid stdin JSON: {e}", "step": "init"})
         return 1
+
+    global _LOG_PATH
+    try:
+        _LOG_PATH = _setup_log(cmd.get("queue_item_id", "unknown"))
+        _emit({"type": "progress", "message": f"Log: {_LOG_PATH}"})
+    except Exception:
+        pass
 
     api_url = cmd["api_url"].rstrip("/")
     token = cmd["token"]
@@ -188,7 +241,9 @@ def main() -> int:
         huji_email=cmd["huji_email"],
         huji_password=cmd["huji_password"],
         output_dir=cmd.get("output_dir") or tempfile.mkdtemp(prefix="jc_"),
-        chrome_profile=cmd.get("chrome_profile", ""),
+        # chrome_profile is intentionally ignored: browser.py uses a dedicated
+        # JC profile under %LOCALAPPDATA%\JournalClub\chrome-profile.
+        chrome_profile="",
         chrome_path=cmd.get("chrome_path", ""),
     )
 
@@ -216,12 +271,21 @@ def main() -> int:
     except Exception as e:
         err_msg = str(e)
         _emit({"type": "progress", "message": f"Download failed: {err_msg}"})
+        log_content = ""
+        if _LOG_PATH:
+            try:
+                with open(_LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
+                    log_content = f.read()
+            except Exception:
+                pass
         try:
             _post(f"{api_url}/queue/{queue_item_id}/failed", token,
-                  json={"error": err_msg, "error_step": "download", "publisher": ""})
+                  json={"error": err_msg, "error_step": "download",
+                        "publisher": "", "log_content": log_content})
         except Exception:
             pass
-        _emit({"type": "error", "message": err_msg, "step": "download"})
+        full_msg = f"{err_msg}\n\nFull log: {_LOG_PATH}" if _LOG_PATH else err_msg
+        _emit({"type": "error", "message": full_msg, "step": "download"})
         return 1
 
     # ── Emit metadata so UI can show article title immediately ────────────────

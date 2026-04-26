@@ -61,7 +61,7 @@ function App() {
 
   const onArticleReady = useCallback(() => setRefreshKey(k => k + 1), []);
 
-  const { activeDownloads, failedItems, retry, deleteItem, report, needsReauth, clearReauth } = useQueuePoller({
+  const { activeDownloads, queuedItems, failedItems, retry, deleteItem, cancelItem, report, needsReauth, clearReauth } = useQueuePoller({
     creds,
     enabled: appState === "authenticated",
     onArticleReady,
@@ -150,22 +150,25 @@ function App() {
           onSignOut={handleSignOut}
         />
 
-        <main style={{ flex: 1, minWidth: 0, overflowY: "auto", background: "var(--color-surface, #fff)" }}>
-          {currentPage === "journals" && <JournalsPage api={api} isDesktop />}
-          {currentPage === "library" && <LibraryPage api={api} refreshKey={refreshKey} onSignOut={handleSignOut} />}
-          {currentPage === "bookmarks" && <BookmarksPage api={api} />}
-          {currentPage === "queue" && <QueuePage api={api} />}
-          {currentPage === "admin" && <div style={{ padding: "1.5rem" }}><p style={{ color: "var(--color-on-surface-variant)" }}>Admin panel — use the web interface at your server URL.</p></div>}
+        <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--color-surface, #fff)" }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+            {currentPage === "journals" && <JournalsPage api={api} isDesktop />}
+            {currentPage === "library" && <LibraryPage api={api} refreshKey={refreshKey} onSignOut={handleSignOut} />}
+            {currentPage === "bookmarks" && <BookmarksPage api={api} />}
+            {currentPage === "queue" && <QueuePage api={api} />}
+            {currentPage === "admin" && <div style={{ padding: "1.5rem" }}><p style={{ color: "var(--color-on-surface-variant)" }}>Admin panel — use the web interface at your server URL.</p></div>}
+          </div>
+          <DownloadPanel
+            activeDownloads={activeDownloads}
+            queuedItems={queuedItems}
+            failedItems={failedItems}
+            onCancel={cancelItem}
+            onRetry={retry}
+            onDelete={deleteItem}
+            onReport={report}
+          />
         </main>
       </div>
-
-      <DownloadPanel
-        activeDownloads={activeDownloads}
-        failedItems={failedItems}
-        onRetry={retry}
-        onDelete={deleteItem}
-        onReport={report}
-      />
 
       {showSettings && (
         <SettingsModal

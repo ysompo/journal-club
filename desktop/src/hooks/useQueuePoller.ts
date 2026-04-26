@@ -3,11 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "@jc/shared";
 import type { QueueItem } from "@jc/shared";
-import { getStoredUserId } from "../store/auth";
+import { getStoredUserId, getApiUrl } from "../store/auth";
 import type { HujiCreds } from "./useKeychain";
 
-const POLL_INTERVAL_MS = 30_000;
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8765";
+const POLL_INTERVAL_MS = 5_000;
 
 export interface ActiveDownload {
   queueItemId: string;
@@ -27,6 +26,7 @@ const AUTH_ERROR_RE = /auth|login|password|credential|401|403|forbidden/i;
 
 export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([]);
+  const [queuedItems, setQueuedItems] = useState<QueueItem[]>([]);
   const [failedItems, setFailedItems] = useState<QueueItem[]>([]);
   const [needsReauth, setNeedsReauth] = useState(false);
   const busyRef = useRef(false);
@@ -46,9 +46,9 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
       const token = localStorage.getItem("jc_access_token") ?? "";
       const deviceId = getStoredUserId() ?? "unknown";
 
-      // Register active download
+      // Register active download — replace any stale entry for the same item
       setActiveDownloads(prev => [
-        ...prev,
+        ...prev.filter(d => d.queueItemId !== item.id),
         { queueItemId: item.id, input: item.input, messages: [], status: "downloading" },
       ]);
 
@@ -123,7 +123,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
             input: item.input,
             queue_item_id: item.id,
             device_id: deviceId,
-            api_url: API_URL,
+            api_url: getApiUrl(),
             token,
             huji_email: creds.email,
             huji_password: creds.password,
@@ -155,14 +155,15 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
       return;
     }
 
-    if (queued.length === 0) {
-      // Also refresh failed items so UI stays current
-      try {
-        const failed = await api.getQueue("failed");
-        setFailedItems(failed);
-      } catch {}
-      return;
-    }
+    // Refresh failed items on every poll
+    try {
+      const failed = await api.getQueue("failed");
+      setFailedItems(failed);
+    } catch {}
+
+    setQueuedItems(queued);
+
+    if (queued.length === 0) return;
 
     busyRef.current = true;
     try {
@@ -175,6 +176,8 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
         // Already claimed by another device — skip
         return;
       }
+      // Remove from queued list now that it's being processed (it'll appear in activeDownloads)
+      setQueuedItems(prev => prev.filter(q => q.id !== item.id));
       await runSidecar(item);
     } finally {
       busyRef.current = false;
@@ -189,10 +192,19 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
     return () => clearInterval(t);
   }, [enabled, pollOnce]);
 
-  // Load initial failed items
+  // On first enable: clear stale items left over from previous session
+  const didClearRef = useRef(false);
+  useEffect(() => {
+    if (!enabled || didClearRef.current) return;
+    didClearRef.current = true;
+    api.clearActiveQueue().catch(() => {});
+  }, [enabled]);
+
+  // Load initial failed + queued items
   useEffect(() => {
     if (!enabled) return;
     api.getQueue("failed").then(setFailedItems).catch(() => {});
+    api.getQueue("queued").then(setQueuedItems).catch(() => {});
   }, [enabled]);
 
   // Cleanup listeners on unmount
@@ -212,11 +224,38 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
     setFailedItems(prev => prev.filter(i => i.id !== itemId));
   }, []);
 
+  const cancelItem = useCallback(async (itemId: string) => {
+    // Kill sidecar process if it's running for this item
+    try { await invoke("cancel_download", { queueItemId: itemId }); } catch {}
+    try { await api.deleteQueueItem(itemId); } catch {}
+    setQueuedItems(prev => prev.filter(i => i.id !== itemId));
+    setActiveDownloads(prev => prev.filter(d => d.queueItemId !== itemId));
+  }, []);
+
   const report = useCallback(async (itemId: string) => {
-    await api.reportFailure(itemId);
+    try {
+      await api.reportFailure(itemId);
+      // Tag the active download so the panel can show "Report sent"
+      setActiveDownloads(prev =>
+        prev.map(d =>
+          d.queueItemId === itemId
+            ? { ...d, errorMsg: (d.errorMsg ?? "") + "\n\n✓ Report sent" }
+            : d
+        )
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setActiveDownloads(prev =>
+        prev.map(d =>
+          d.queueItemId === itemId
+            ? { ...d, errorMsg: (d.errorMsg ?? "") + `\n\n✗ Report failed: ${msg}` }
+            : d
+        )
+      );
+    }
   }, []);
 
   const clearReauth = useCallback(() => setNeedsReauth(false), []);
 
-  return { activeDownloads, failedItems, retry, deleteItem, report, pollOnce, needsReauth, clearReauth };
+  return { activeDownloads, queuedItems, failedItems, retry, deleteItem, cancelItem, report, pollOnce, needsReauth, clearReauth };
 }

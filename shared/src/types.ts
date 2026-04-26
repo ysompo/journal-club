@@ -99,6 +99,8 @@ export interface TocArticle {
   abstract: string | null;
   doi: string | null;
   url: string;
+  article_type?: string;
+  pub_types?: string[];
 }
 
 export interface HistoryItem {

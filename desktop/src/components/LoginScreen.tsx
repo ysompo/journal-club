@@ -74,7 +74,7 @@ export function LoginScreen({ onSuccess }: Props) {
           }}
         >
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            <Field label="HUJI username">
+            <Field label="Username" hint="Your HUJI username (e.g. jsmith) — not your full email">
               <input
                 type="text"
                 value={hujiUsername}
@@ -109,7 +109,7 @@ export function LoginScreen({ onSuccess }: Props) {
               </>
             )}
 
-            <Field label="Password">
+            <Field label="Password" hint="Your Journal Club password — not your HUJI password">
               <input
                 type="password"
                 value={password}
@@ -147,13 +147,14 @@ export function LoginScreen({ onSuccess }: Props) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
       <label style={{ fontSize: "0.8125rem", fontFamily: "var(--font-label)", color: "var(--color-on-surface-variant)", fontWeight: 500 }}>
         {label}
       </label>
       {children}
+      {hint && <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--color-on-surface-variant)", opacity: 0.75 }}>{hint}</p>}
     </div>
   );
 }

@@ -24,7 +24,7 @@ const STATUS_BG: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   queued:      "Queued",
-  claimed:     "Claimed",
+  claimed:     "Downloading…",
   downloading: "Downloading…",
   done:        "Done",
   failed:      "Failed",
