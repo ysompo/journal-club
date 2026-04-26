@@ -1,55 +1,82 @@
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandEvent, CommandChild};
 use tauri::{Emitter, Manager};
-use keyring::Entry;
+use std::path::PathBuf;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
-const KEYRING_SERVICE: &str = "com.ysomp.journal-club";
-const KEYRING_USER_EMAIL: &str = "huji_email";
-const KEYRING_USER_PASSWORD: &str = "huji_password";
-const KEYRING_CHROME_PROFILE: &str = "chrome_profile";
-
-#[tauri::command]
-fn get_huji_credentials() -> Result<(String, String, String), String> {
-    let email = Entry::new(KEYRING_SERVICE, KEYRING_USER_EMAIL)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    let password = Entry::new(KEYRING_SERVICE, KEYRING_USER_PASSWORD)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    let chrome_profile = Entry::new(KEYRING_SERVICE, KEYRING_CHROME_PROFILE)
-        .map_err(|e| e.to_string())?
-        .get_password()
-        .unwrap_or_default();
-    Ok((email, password, chrome_profile))
+fn download_children() -> &'static Mutex<HashMap<String, CommandChild>> {
+    static CHILDREN: OnceLock<Mutex<HashMap<String, CommandChild>>> = OnceLock::new();
+    CHILDREN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[tauri::command]
-fn save_huji_credentials(email: String, password: String, chrome_profile: String) -> Result<(), String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_EMAIL)
-        .map_err(|e| e.to_string())?
-        .set_password(&email)
-        .map_err(|e| e.to_string())?;
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_PASSWORD)
-        .map_err(|e| e.to_string())?
-        .set_password(&password)
-        .map_err(|e| e.to_string())?;
-    Entry::new(KEYRING_SERVICE, KEYRING_CHROME_PROFILE)
-        .map_err(|e| e.to_string())?
-        .set_password(&chrome_profile)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+struct StoredCreds {
+    huji_email: String,
+    huji_password: String,
+    chrome_profile: String,
+    app_username: String,
+    app_password: String,
 }
 
-#[tauri::command]
-fn clear_huji_credentials() -> Result<(), String> {
-    for key in &[KEYRING_USER_EMAIL, KEYRING_USER_PASSWORD, KEYRING_CHROME_PROFILE] {
-        let _ = Entry::new(KEYRING_SERVICE, key)
-            .map_err(|e| e.to_string())?
-            .delete_credential();
+fn creds_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("credentials.json"))
+        .map_err(|e| e.to_string())
+}
+
+fn load_stored_creds(app: &tauri::AppHandle) -> StoredCreds {
+    let Ok(path) = creds_path(app) else { return StoredCreds::default(); };
+    let Ok(data) = std::fs::read_to_string(&path) else { return StoredCreds::default(); };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+fn write_stored_creds(app: &tauri::AppHandle, creds: &StoredCreds) -> Result<(), String> {
+    let path = creds_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    Ok(())
+    let data = serde_json::to_string(creds).map_err(|e| e.to_string())?;
+    std::fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_huji_credentials(app: tauri::AppHandle) -> Result<(String, String, String), String> {
+    let c = load_stored_creds(&app);
+    Ok((c.huji_email, c.huji_password, c.chrome_profile))
+}
+
+#[tauri::command]
+fn save_huji_credentials(app: tauri::AppHandle, email: String, password: String, chrome_profile: String) -> Result<(), String> {
+    let mut c = load_stored_creds(&app);
+    c.huji_email = email;
+    c.huji_password = password;
+    c.chrome_profile = chrome_profile;
+    write_stored_creds(&app, &c)
+}
+
+#[tauri::command]
+fn get_app_credentials(app: tauri::AppHandle) -> Result<(String, String), String> {
+    let c = load_stored_creds(&app);
+    Ok((c.app_username, c.app_password))
+}
+
+#[tauri::command]
+fn save_app_credentials(app: tauri::AppHandle, username: String, password: String) -> Result<(), String> {
+    let mut c = load_stored_creds(&app);
+    c.app_username = username;
+    c.app_password = password;
+    write_stored_creds(&app, &c)
+}
+
+#[tauri::command]
+fn clear_huji_credentials(app: tauri::AppHandle) -> Result<(), String> {
+    let mut c = load_stored_creds(&app);
+    c.huji_email = String::new();
+    c.huji_password = String::new();
+    c.chrome_profile = String::new();
+    write_stored_creds(&app, &c)
 }
 
 #[derive(serde::Deserialize)]
@@ -66,18 +93,27 @@ pub struct DownloadCmd {
 }
 
 #[tauri::command]
-async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), String> {
-    // Resolve path to sidecar Python script (relative to the app resource dir in production,
-    // or the repo root in dev)
-    let sidecar_path = {
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .map_err(|e: tauri::Error| e.to_string())?;
-        resource_dir.join("sidecar").join("jc-download.py")
+fn cancel_download(queue_item_id: String) -> Result<(), String> {
+    let child_opt = {
+        let mut map = download_children().lock().map_err(|e| e.to_string())?;
+        map.remove(&queue_item_id)
     };
+    if let Some(child) = child_opt {
+        child.kill().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
-    let sidecar_path_str = sidecar_path.to_string_lossy().to_string();
+#[tauri::command]
+async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), String> {
+    // Persistent per-user Playwright browser cache. Survives app updates so
+    // Chromium is only downloaded on first run.
+    let browsers_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("browsers");
+    std::fs::create_dir_all(&browsers_dir).map_err(|e| e.to_string())?;
 
     let stdin_payload = serde_json::json!({
         "input":         cmd.input,
@@ -90,21 +126,34 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
         "chrome_profile": cmd.chrome_profile,
         "chrome_path":   cmd.chrome_path,
         "output_dir":    std::env::temp_dir().join("jc_downloads").to_string_lossy(),
+        "browsers_dir":  browsers_dir.to_string_lossy(),
     });
-    let stdin_bytes = serde_json::to_vec(&stdin_payload).map_err(|e| e.to_string())?;
+    // Append newline so the sidecar (which uses readline()) unblocks immediately.
+    // tauri-plugin-shell's CommandChild has no close_stdin(), so we can't signal EOF.
+    let mut stdin_bytes = serde_json::to_vec(&stdin_payload).map_err(|e| e.to_string())?;
+    stdin_bytes.push(b'\n');
 
     let (mut rx, mut child) = app
         .shell()
-        .command("python3")
-        .args([&sidecar_path_str])
+        .sidecar("jc-download")
+        .map_err(|e| e.to_string())?
         .spawn()
         .map_err(|e| e.to_string())?;
 
     // Write JSON config to stdin then close it
     child.write(&stdin_bytes).map_err(|e| e.to_string())?;
 
+    // Register child so cancel_download can kill it
+    let queue_item_id = cmd.queue_item_id.clone();
+    if let Ok(mut map) = download_children().lock() {
+        map.insert(queue_item_id.clone(), child);
+    }
+
     // Stream stdout lines as Tauri events to the frontend
+    let app_for_task = app.clone();
+    let qid = queue_item_id.clone();
     tauri::async_runtime::spawn(async move {
+        let app = app_for_task;
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
@@ -117,9 +166,26 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                     let _ = app.emit("download-error", e);
                     break;
                 }
-                CommandEvent::Terminated(_) => break,
+                CommandEvent::Terminated(payload) => {
+                    if payload.code != Some(0) {
+                        let msg = serde_json::json!({
+                            "type": "error",
+                            "message": format!(
+                                "Sidecar exited unexpectedly (code {:?}). Check stderr output above.",
+                                payload.code
+                            ),
+                            "step": "process"
+                        });
+                        let _ = app.emit("download-progress", msg.to_string());
+                    }
+                    break;
+                }
                 _ => {}
             }
+        }
+        // Remove from registry once the process has exited
+        if let Ok(mut map) = download_children().lock() {
+            map.remove(&qid);
         }
     });
 
@@ -131,11 +197,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             start_download,
+            cancel_download,
             get_huji_credentials,
             save_huji_credentials,
             clear_huji_credentials,
+            get_app_credentials,
+            save_app_credentials,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,0 +1,6 @@
+requests
+httpx
+beautifulsoup4
+PyYAML
+lxml
+playwright

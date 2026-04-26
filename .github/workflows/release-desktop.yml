@@ -1,0 +1,104 @@
+name: Release Desktop App
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Python sidecar
+        # Chromium itself is NOT bundled in the sidecar exe (would bloat it to
+        # ~200 MB). Instead the sidecar downloads Chromium on first run into a
+        # persistent per-user cache (%APPDATA%\com.ysomp.journal-club\browsers).
+        # --collect-all playwright still ships the node driver so the install
+        # command can run offline-of-Python's-own-CLI.
+        run: |
+          pip install pyinstaller -r desktop/src-tauri/sidecar/requirements.txt
+          pyinstaller --onefile desktop/src-tauri/sidecar/jc-download.py `
+            --name jc-download `
+            --add-data "journal_club;journal_club" `
+            --add-data "download.py;." `
+            --hidden-import yaml `
+            --hidden-import httpx `
+            --hidden-import bs4 `
+            --hidden-import lxml `
+            --hidden-import xml.etree.ElementTree `
+            --hidden-import xml.etree `
+            --hidden-import sqlite3 `
+            --collect-all journal_club `
+            --collect-all playwright `
+            --distpath desktop/src-tauri/binaries
+
+      - name: Rename sidecar to Tauri target triple
+        run: |
+          Rename-Item `
+            desktop/src-tauri/binaries/jc-download.exe `
+            jc-download-x86_64-pc-windows-msvc.exe
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Write signing key to file
+        shell: powershell
+        env:
+          SIGNING_KEY_B64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $bytes = [System.Convert]::FromBase64String($env:SIGNING_KEY_B64.Trim())
+          $key = [System.Text.Encoding]::UTF8.GetString($bytes)
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\tauri.key", $key)
+          Write-Host "Key written, first line: $($key.Split("`n")[0])"
+
+      - name: Build Tauri app
+        shell: powershell
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}\tauri.key
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd desktop
+          pnpm tauri build
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Journal Club ${{ github.ref_name }}"
+          body: "See release notes."
+          draft: false
+          prerelease: false
+          files: |
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/msi/*.msi.zip
+            desktop/src-tauri/target/release/bundle/msi/*.msi.zip.sig
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip
+            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig

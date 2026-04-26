@@ -102,10 +102,14 @@ export function LibraryPage({ api, refreshKey, onSignOut, onAddArticle }: Props)
     setPdfLoading(true);
     try {
       const blob = await api.downloadPdf(article.id);
+      if (!blob || blob.size === 0) throw new Error("Empty PDF response");
       if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       setPdfBlobUrl(URL.createObjectURL(blob));
-    } catch { setArticleError("Could not load PDF"); }
-    finally { setPdfLoading(false); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("openPdf failed:", e);
+      setArticleError(`Could not load PDF: ${msg}`);
+    } finally { setPdfLoading(false); }
   }
 
   function closePdf() { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }

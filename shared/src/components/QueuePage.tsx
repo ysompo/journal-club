@@ -24,7 +24,7 @@ const STATUS_BG: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   queued:      "Queued",
-  claimed:     "Claimed",
+  claimed:     "Downloading…",
   downloading: "Downloading…",
   done:        "Done",
   failed:      "Failed",
@@ -34,6 +34,12 @@ export function QueuePage({ api }: Props) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [desktopOnline, setDesktopOnline] = useState<boolean | null>(null);
+  const [hint, setHint] = useState<{ msg: string; kind: "info" | "error" } | null>(null);
+
+  const showHint = (msg: string, kind: "info" | "error" = "info") => {
+    setHint({ msg, kind });
+    setTimeout(() => setHint(null), 4000);
+  };
 
   const refresh = useCallback(() => {
     api.getQueue().then(setQueue).catch(() => {}).finally(() => setLoading(false));
@@ -52,7 +58,15 @@ export function QueuePage({ api }: Props) {
 
   const handleRetry = async (id: string) => { await api.retryQueueItem(id); refresh(); };
   const handleDelete = async (id: string) => { await api.deleteQueueItem(id); refresh(); };
-  const handleReport = async (id: string) => { await api.reportFailure(id); refresh(); };
+  const handleReport = async (id: string) => {
+    try {
+      await api.reportFailure(id);
+      showHint("Report sent");
+      refresh();
+    } catch {
+      showHint("Could not send report — item may have been removed.", "error");
+    }
+  };
 
   const fmtDate = (s: string) => new Date(s).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -81,6 +95,17 @@ export function QueuePage({ api }: Props) {
           Desktop: {desktopOnline === true ? "Online" : desktopOnline === false ? "Offline" : "Unknown"}
         </span>
       </div>
+
+      {hint && (
+        <div style={{
+          padding: "0.6rem 1rem", borderRadius: "0.4rem", marginBottom: "1rem", fontSize: "0.85rem",
+          fontFamily: "var(--font-label, 'DM Sans', sans-serif)",
+          background: hint.kind === "error" ? "var(--color-error-bg, #F7DCDC)" : "var(--color-success-bg, #D4EDE2)",
+          color: hint.kind === "error" ? "var(--color-error, #9B2C2C)" : "var(--color-success, #2E6B4F)",
+        }}>
+          {hint.msg}
+        </div>
+      )}
 
       {loading && <div style={emptyStyle}>Loading…</div>}
 

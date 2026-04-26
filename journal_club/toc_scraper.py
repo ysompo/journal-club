@@ -272,6 +272,13 @@ def scrape_ajog_html(html_content: str) -> TocResult:
                 if url.startswith("/"):
                     url = "https://www.ajog.org" + url
 
+                # Skip pre-proof / "Articles in Press" entries — they're not
+                # part of a closed issue. AJOG marks them with "Available
+                # online" or similar text and lacks a page number.
+                item_text = item.get_text(" ", strip=True)
+                if _is_in_press(item_text, url):
+                    continue
+
                 doi_match = re.search(r"10\.\d{4}/\S+", url)
                 doi = doi_match.group(0) if doi_match else None
 

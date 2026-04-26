@@ -130,6 +130,7 @@ async def init_db():
                 error_step TEXT,
                 error_message TEXT,
                 publisher TEXT,
+                log_content TEXT,
                 occurred_at TEXT NOT NULL,
                 reported INTEGER DEFAULT 0
             );

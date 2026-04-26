@@ -34,7 +34,7 @@ class ArticleMetadata:
 
 # ── Input classification ──────────────────────────────────────────────────────
 
-_PMID_RE  = re.compile(r"^\d{6,9}$")
+_PMID_RE  = re.compile(r"^(?:pmid:)?\d{6,9}$", re.IGNORECASE)
 _DOI_RE   = re.compile(r"^(?:doi:)?10\.\d{4,9}/\S+$", re.IGNORECASE)
 _PUBMED_RE = re.compile(
     r"(?:pubmed\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov/pubmed)/(\d+)", re.IGNORECASE
@@ -52,7 +52,7 @@ def _classify(s: str) -> tuple[str, str]:
     if m:
         return "pmid", m.group(1)
     if _PMID_RE.match(s):
-        return "pmid", s
+        return "pmid", re.sub(r"^pmid:", "", s, flags=re.IGNORECASE)
     if _DOI_RE.match(s):
         doi = re.sub(r"^doi:", "", s, flags=re.IGNORECASE)
         return "doi", doi

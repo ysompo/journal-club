@@ -231,6 +231,10 @@ export class JournalClubApi {
     return this.request<{ ok: boolean }>("DELETE", `/queue/${queueItemId}`);
   }
 
+  clearActiveQueue() {
+    return this.request<{ ok: boolean }>("DELETE", `/queue/active`);
+  }
+
   reportFailure(queueItemId: string) {
     return this.request<{ ok: boolean }>("POST", `/queue/${queueItemId}/report`);
   }

@@ -5,6 +5,7 @@ import type { Journal, TocArticle, QueueItem } from "../types";
 
 interface Props {
   api: JournalClubApi;
+  isDesktop?: boolean;
 }
 
 type Scope = 1 | 3 | 6 | 12;
@@ -14,6 +15,7 @@ interface JournalState {
   toc: TocArticle[];
   loading: boolean;
   scope: Scope;
+  excludedTypes?: Set<string>;
 }
 
 type DlStatus = "idle" | "queued" | "downloading" | "done" | "failed";
@@ -35,7 +37,7 @@ function saveOrder(order: string[]) {
   localStorage.setItem("jc-journal-order", JSON.stringify(order));
 }
 
-export function JournalsPage({ api }: Props) {
+export function JournalsPage({ api, isDesktop = false }: Props) {
   const [journals, setJournals] = useState<Journal[]>([]);
   const [journalStates, setJournalStates] = useState<Record<string, JournalState>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -180,9 +182,9 @@ export function JournalsPage({ api }: Props) {
         abstract: article.abstract, url: article.url,
       }).catch(() => {});
       refreshQueue();
-      showHint("Sent to desktop for download");
+      showHint(isDesktop ? "Added to download queue" : "Sent to desktop for download");
     } catch {
-      showHint("Could not send to desktop — please try again.", "error");
+      showHint(isDesktop ? "Could not queue download — please try again." : "Could not send to desktop — please try again.", "error");
     }
   };
 
@@ -222,14 +224,20 @@ export function JournalsPage({ api }: Props) {
 
   const handleReport = async (article: TocArticle) => {
     const item = matchQueue(article, queueRef.current);
-    if (item) await api.reportFailure(item.id);
+    if (!item) return;
+    try {
+      await api.reportFailure(item.id);
+      showHint("Report sent");
+    } catch {
+      showHint("Could not send report — item may have been removed.", "error");
+    }
   };
 
   const getStatus = (article: TocArticle): DlStatus => {
     const item = matchQueue(article, queue);
     if (!item) return "idle";
-    if (item.status === "queued" || item.status === "claimed") return "queued";
-    if (item.status === "downloading") return "downloading";
+    if (item.status === "queued") return "queued";
+    if (item.status === "claimed" || item.status === "downloading") return "downloading";
     if (item.status === "done") return "done";
     if (item.status === "failed") return "failed";
     return "idle";
@@ -281,6 +289,25 @@ export function JournalsPage({ api }: Props) {
   const currentToc = currentState?.toc ?? [];
   const currentLoading = currentState?.loading ?? false;
   const currentScope = currentState?.scope ?? 1;
+
+  const typeOf = (a: TocArticle) => a.article_type ?? "Other";
+  const typeCounts = currentToc.reduce<Record<string, number>>((acc, a) => {
+    const t = typeOf(a); acc[t] = (acc[t] ?? 0) + 1; return acc;
+  }, {});
+  const availableTypes = Object.keys(typeCounts).sort();
+  const excludedTypes = (selectedId && journalStates[selectedId]?.excludedTypes) || new Set<string>();
+  const filteredToc = currentToc.filter(a => !excludedTypes.has(typeOf(a)));
+
+  const toggleType = (t: string) => {
+    if (!selectedId) return;
+    setJournalStates(prev => {
+      const cur = prev[selectedId];
+      if (!cur) return prev;
+      const next = new Set(cur.excludedTypes ?? []);
+      if (next.has(t)) next.delete(t); else next.add(t);
+      return { ...prev, [selectedId]: { ...cur, excludedTypes: next } };
+    });
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
@@ -433,7 +460,7 @@ export function JournalsPage({ api }: Props) {
             </div>
 
             {/* Scope pills */}
-            <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 1.25rem", flexWrap: "wrap" as const }}>
+            <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 0.5rem", flexWrap: "wrap" as const }}>
               {([1, 3, 6, 12] as Scope[]).map(s => (
                 <button key={s} onClick={() => loadTocForId(selectedJournal.id, s)} style={S.scopePill(currentScope === s)}>
                   {SCOPE_LABELS[s]}
@@ -441,17 +468,33 @@ export function JournalsPage({ api }: Props) {
               ))}
             </div>
 
+            {/* Article-type filter chips */}
+            {availableTypes.length > 1 && (
+              <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 1.25rem", flexWrap: "wrap" as const }}>
+                {availableTypes.map(t => {
+                  const active = !excludedTypes.has(t);
+                  return (
+                    <button key={t} onClick={() => toggleType(t)} style={S.scopePill(active)} title={active ? "Click to hide" : "Click to show"}>
+                      {t} ({typeCounts[t]})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Articles */}
             <div style={{ padding: "0 2rem 4rem" }}>
               {currentLoading && <div style={S.infoMsg}>Loading articles…</div>}
-              {!currentLoading && currentToc.length === 0 && (
+              {!currentLoading && filteredToc.length === 0 && (
                 <div style={S.infoMsg}>
-                  {selectedJournal.is_following
-                    ? "No articles found for this period. Try a longer range."
-                    : "Follow this journal to load articles."}
+                  {currentToc.length === 0
+                    ? (selectedJournal.is_following
+                        ? "No articles found for this period. Try a longer range."
+                        : "Follow this journal to load articles.")
+                    : "No articles match the selected filters."}
                 </div>
               )}
-              {!currentLoading && currentToc.map(article => {
+              {!currentLoading && filteredToc.map(article => {
                 const key = article.pmid ?? article.doi ?? article.url;
                 return (
                   <ArticleItem
@@ -460,6 +503,7 @@ export function JournalsPage({ api }: Props) {
                     status={getStatus(article)}
                     queuePos={getQueuePos(article)}
                     emailSelected={emailSet.has(key)}
+                    isDesktop={isDesktop}
                     onDownload={() => handleDownload(article)}
                     onCancel={() => handleCancelDownload(article)}
                     onEmail={() => toggleEmail(article)}
@@ -545,18 +589,18 @@ function JournalListItem({ journal, isSelected, isLoading, showReorder, canMoveU
 
 // ─── Article item ──────────────────────────────────────────────────────────────
 
-function ArticleItem({ article, status, queuePos, emailSelected, onDownload, onCancel, onEmail, onReport }: {
-  article: TocArticle; status: DlStatus; queuePos: number; emailSelected: boolean;
+function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDownload, onCancel, onEmail, onReport }: {
+  article: TocArticle; status: DlStatus; queuePos: number; emailSelected: boolean; isDesktop: boolean;
   onDownload: () => void; onCancel: () => void; onEmail: () => void; onReport: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   const dlLabel = () => {
-    if (status === "queued") return queuePos > 1 ? `🖥 #${queuePos}` : "🖥 Sending…";
-    if (status === "downloading") return "🖥 Loading…";
+    if (status === "queued") return isDesktop ? (queuePos > 1 ? `#${queuePos} queued` : "Queued…") : (queuePos > 1 ? `🖥 #${queuePos}` : "🖥 Sending…");
+    if (status === "downloading") return isDesktop ? "Downloading…" : "🖥 Loading…";
     if (status === "done") return "View PDF";
     if (status === "failed") return "Failed";
-    return "🖥 Send";
+    return isDesktop ? "Download" : "🖥 Send";
   };
 
   const dlColor = status === "done" ? "var(--color-success, #2E6B4F)"

@@ -1,11 +1,22 @@
 import { useState, useEffect } from "react";
 import { api } from "@jc/shared";
+import { getVersion } from "@tauri-apps/api/app";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { getApiUrl, saveApiUrl } from "../store/auth";
 
-const APP_VERSION = "0.1.0";
+type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "up-to-date" }
+  | { state: "available"; version: string; install: () => Promise<void> }
+  | { state: "installing" }
+  | { state: "error"; message: string };
 
 interface Props {
   onClose: () => void;
+  hujiEmail: string;
+  onSaveHuji: (email: string, password: string) => Promise<void>;
 }
 
 type Theme = "light" | "dark" | "system";
@@ -22,7 +33,7 @@ const btnStyle = (active: boolean): React.CSSProperties => ({
   cursor: "pointer",
 });
 
-export function SettingsModal({ onClose }: Props) {
+export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
   const [theme, setTheme] = useState<Theme>("system");
   const [fontSize, setFontSize] = useState<FontSize>("medium");
   const [emails, setEmails] = useState<string[]>([]);
@@ -32,6 +43,31 @@ export function SettingsModal({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState(getApiUrl());
   const [urlSaved, setUrlSaved] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: "idle" });
+
+  const [hujiEmailEdit, setHujiEmailEdit] = useState(hujiEmail);
+  const [hujiPassword, setHujiPassword] = useState("");
+  const [hujiSaving, setHujiSaving] = useState(false);
+  const [hujiSaved, setHujiSaved] = useState(false);
+  const [hujiError, setHujiError] = useState<string | null>(null);
+
+  async function saveHuji(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hujiEmailEdit.trim() || !hujiPassword) return;
+    setHujiSaving(true);
+    setHujiError(null);
+    try {
+      await onSaveHuji(hujiEmailEdit.trim(), hujiPassword);
+      setHujiPassword("");
+      setHujiSaved(true);
+      setTimeout(() => setHujiSaved(false), 2500);
+    } catch (err) {
+      setHujiError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setHujiSaving(false);
+    }
+  }
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -40,7 +76,34 @@ export function SettingsModal({ onClose }: Props) {
       setEmails(s.email_addresses);
       setLoading(false);
     }).catch(() => setLoading(false));
+    getVersion().then(setAppVersion).catch(() => setAppVersion("?"));
   }, []);
+
+  async function checkForUpdates() {
+    setUpdateStatus({ state: "checking" });
+    try {
+      const update = await check();
+      if (update?.available) {
+        setUpdateStatus({
+          state: "available",
+          version: update.version,
+          install: async () => {
+            setUpdateStatus({ state: "installing" });
+            try {
+              await update.downloadAndInstall();
+              await relaunch();
+            } catch (e) {
+              setUpdateStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
+            }
+          },
+        });
+      } else {
+        setUpdateStatus({ state: "up-to-date" });
+      }
+    } catch (e) {
+      setUpdateStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -70,10 +133,19 @@ export function SettingsModal({ onClose }: Props) {
     display: "block",
   };
 
+  // Guard against dismissing the modal during an in-flight update install —
+  // `downloadAndInstall` is not cancellable and `relaunch` will fire even if
+  // the modal unmounts, leaving the user with no progress indicator.
+  const isInstalling = updateStatus.state === "installing";
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (isInstalling) return;
+    if (e.target === e.currentTarget) onClose();
+  };
+
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={handleBackdropClick}
     >
       <div style={{ background: "var(--color-surface-container-lowest)", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius-lg)", padding: "1.5rem", width: "100%", maxWidth: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
         <h2 style={{ fontFamily: "var(--font-headline)", fontSize: "1.25rem", color: "var(--color-on-surface)", margin: "0 0 1.25rem" }}>
@@ -145,6 +217,41 @@ export function SettingsModal({ onClose }: Props) {
               </div>
             </div>
 
+            {/* HUJI library credentials */}
+            <div>
+              <span style={label}>HUJI library credentials</span>
+              <form onSubmit={saveHuji} style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                <input
+                  type="email"
+                  value={hujiEmailEdit}
+                  onChange={e => setHujiEmailEdit(e.target.value)}
+                  placeholder="username@mail.huji.ac.il"
+                  required
+                  style={{ padding: "0.35rem 0.625rem", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius)", background: "var(--color-surface-container)", color: "var(--color-on-surface)", fontFamily: "var(--font-body)", fontSize: "0.8rem", outline: "none" }}
+                />
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="password"
+                    value={hujiPassword}
+                    onChange={e => setHujiPassword(e.target.value)}
+                    placeholder="New password"
+                    style={{ flex: 1, padding: "0.35rem 0.625rem", border: "1px solid var(--color-outline-variant)", borderRadius: "var(--radius)", background: "var(--color-surface-container)", color: "var(--color-on-surface)", fontFamily: "var(--font-body)", fontSize: "0.8rem", outline: "none" }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={hujiSaving || !hujiPassword || !hujiEmailEdit.trim()}
+                    style={{ ...btnStyle(false), flexShrink: 0, opacity: (!hujiPassword || !hujiEmailEdit.trim()) ? 0.5 : 1 }}
+                  >
+                    {hujiSaving ? "Saving…" : hujiSaved ? "Saved!" : "Update"}
+                  </button>
+                </div>
+                {hujiError && <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-error)" }}>{hujiError}</p>}
+                <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--color-on-surface-variant)" }}>
+                  Used only to fetch PDFs through the HUJI library proxy. Stored locally, never sent to the server.
+                </p>
+              </form>
+            </div>
+
             {/* Server URL */}
             <div>
               <span style={label}>Server URL</span>
@@ -170,19 +277,37 @@ export function SettingsModal({ onClose }: Props) {
             {error && <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-error)" }}>{error}</p>}
 
             <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "0.25rem" }}>
-              <button onClick={onClose} style={btnStyle(false)}>Cancel</button>
+              <button onClick={onClose} disabled={isInstalling} style={{ ...btnStyle(false), opacity: isInstalling ? 0.5 : 1 }}>Cancel</button>
               <button
                 onClick={save}
-                disabled={saving}
-                style={{ ...btnStyle(true), opacity: saving ? 0.6 : 1 }}
+                disabled={saving || isInstalling}
+                style={{ ...btnStyle(true), opacity: saving || isInstalling ? 0.6 : 1 }}
               >
                 {saving ? "Saving…" : "Save"}
               </button>
             </div>
 
-            <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--color-on-surface-variant)", borderTop: "1px solid var(--color-outline-variant)", paddingTop: "0.75rem" }}>
-              Journal Club v{APP_VERSION}
-            </p>
+            <div style={{ borderTop: "1px solid var(--color-outline-variant)", paddingTop: "0.75rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+              <div style={{ fontSize: "0.7rem", color: "var(--color-on-surface-variant)", lineHeight: 1.5 }}>
+                <div>Journal Club v{appVersion || "…"}</div>
+                {updateStatus.state === "up-to-date" && <div style={{ color: "var(--color-on-surface-variant)" }}>You're up to date.</div>}
+                {updateStatus.state === "available" && <div style={{ color: "var(--color-primary)" }}>v{updateStatus.version} is available.</div>}
+                {updateStatus.state === "error" && <div style={{ color: "var(--color-error)" }}>{updateStatus.message}</div>}
+              </div>
+              {updateStatus.state === "available" ? (
+                <button onClick={() => updateStatus.install()} style={btnStyle(true)}>
+                  Install & relaunch
+                </button>
+              ) : (
+                <button
+                  onClick={checkForUpdates}
+                  disabled={updateStatus.state === "checking" || updateStatus.state === "installing"}
+                  style={btnStyle(false)}
+                >
+                  {updateStatus.state === "checking" ? "Checking…" : updateStatus.state === "installing" ? "Installing…" : "Check for updates"}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

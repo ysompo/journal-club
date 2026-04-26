@@ -9,10 +9,7 @@ from routers.users import get_current_user
 
 router = APIRouter(prefix="/journals", tags=["journals"])
 
-PUBMED_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-PUBMED_EFETCH  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-PUBMED_TOOL    = "JournalClubApp"
-PUBMED_EMAIL   = os.environ.get("PUBMED_EMAIL", "")  # required by NCBI ToS
+EPMC_SEARCH = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 
 # In-memory TOC cache: key=(journal_id, months) → (fetched_at, articles)
 _toc_cache: dict[tuple, tuple] = {}
@@ -39,92 +36,44 @@ def _cache_fresh(key: tuple) -> list | None:
     return articles
 
 
-async def _fetch_pubmed_toc(issn: str, months: int, abbreviation: str = "") -> list[dict]:
-    since = (datetime.now(timezone.utc) - timedelta(days=months * 31)).strftime("%Y/%m/%d")
-    today = datetime.now(timezone.utc).strftime("%Y/%m/%d")
-    date_filter = f'("{since}"[PDAT]:"{today}"[PDAT])'
-
+async def _epmc_search(query: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=20) as client:
-        # Step 1: esearch — get PMIDs by ISSN
-        r = await client.get(PUBMED_ESEARCH, params={
-            "db": "pubmed",
-            "term": f'"{issn}"[ISSN] AND {date_filter}',
-            "retmax": 100,
-            "retmode": "json",
-            "sort": "pub+date",
-            "tool": PUBMED_TOOL,
-            "email": PUBMED_EMAIL,
+        r = await client.get(EPMC_SEARCH, params={
+            "query": query,
+            "format": "json",
+            "resultType": "core",
+            "pageSize": 100,
+            "sort": "FIRST_PDATE_D desc",
         })
         r.raise_for_status()
-        data = r.json()
-        pmids = data.get("esearchresult", {}).get("idlist", [])
+        return r.json().get("resultList", {}).get("result", [])
 
-        # Fallback: search by journal title abbreviation [TA] if ISSN returned nothing
-        if not pmids and abbreviation:
-            r2a = await client.get(PUBMED_ESEARCH, params={
-                "db": "pubmed",
-                "term": f'"{abbreviation}"[TA] AND {date_filter}',
-                "retmax": 100,
-                "retmode": "json",
-                "sort": "pub+date",
-                "tool": PUBMED_TOOL,
-                "email": PUBMED_EMAIL,
-            })
-            r2a.raise_for_status()
-            pmids = r2a.json().get("esearchresult", {}).get("idlist", [])
 
-        if not pmids:
-            return []
+async def _fetch_pubmed_toc(issn: str, months: int, abbreviation: str = "") -> list[dict]:
+    since = (datetime.now(timezone.utc) - timedelta(days=months * 31)).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date_filter = f'FIRST_PDATE:[{since} TO {today}]'
 
-        # Step 2: efetch — get article details
-        r2 = await client.get(PUBMED_EFETCH, params={
-            "db": "pubmed",
-            "id": ",".join(pmids),
-            "retmode": "xml",
-            "tool": PUBMED_TOOL,
-            "email": PUBMED_EMAIL,
-        })
-        r2.raise_for_status()
+    results = await _epmc_search(f'ISSN:"{issn}" AND {date_filter}')
+    if not results and abbreviation:
+        results = await _epmc_search(f'JOURNAL:"{abbreviation}" AND {date_filter}')
 
-    root = ElementTree.fromstring(r2.text)
     articles = []
-    for art in root.findall(".//PubmedArticle"):
+    for r in results:
         try:
-            medline = art.find("MedlineCitation")
-            article = medline.find("Article")
+            pmid = r.get("pmid") or ""
+            title = r.get("title") or ""
+            abstract = r.get("abstractText")
+            doi = r.get("doi")
+            journal_name = (r.get("journalInfo") or {}).get("journal", {}).get("title") or ""
+            pub_date = r.get("firstPublicationDate") or ""
 
-            title = article.findtext("ArticleTitle") or ""
-            abstract_el = article.find("Abstract/AbstractText")
-            abstract = abstract_el.text if abstract_el is not None else None
+            author_str = r.get("authorString") or ""
+            authors = [a.strip() for a in author_str.split(",") if a.strip()]
 
-            authors = []
-            for a in article.findall("AuthorList/Author"):
-                last = a.findtext("LastName") or ""
-                fore = a.findtext("ForeName") or a.findtext("Initials") or ""
-                name = f"{last} {fore}".strip()
-                if name:
-                    authors.append(name)
-
-            pmid = medline.findtext("PMID") or ""
-            journal_el = article.find("Journal")
-            journal_name = journal_el.findtext("Title") or "" if journal_el is not None else ""
-            pub_date_el = (
-                journal_el.find("JournalIssue/PubDate") if journal_el is not None else None
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else (
+                f"https://doi.org/{doi}" if doi else ""
             )
-            if pub_date_el is not None:
-                year  = pub_date_el.findtext("Year") or ""
-                month = pub_date_el.findtext("Month") or ""
-                pub_date = f"{year} {month}".strip()
-            else:
-                pub_date = ""
-
-            doi = None
-            for aid in art.findall(".//ArticleId"):
-                if aid.get("IdType") == "doi":
-                    doi = aid.text
-                    break
-
-            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else ""
 
             articles.append({
                 "pmid": pmid,
