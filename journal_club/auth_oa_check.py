@@ -7,23 +7,60 @@ Returns True if PDF was captured, False otherwise.
 import json
 import re
 import sys
+import threading
 import time
 from playwright.sync_api import Page, BrowserContext
 
 from journal_club.pdf_capture import wait_for_pdf
 
+# Module-level state for the stdin command listener (one per sidecar process)
+_cf_page_ref: list = [None]
+_stdin_listener_started = False
 
-def _emit_cloudflare_alert() -> None:
-    """Emit structured event so the desktop UI can prompt the user to solve CF."""
+
+def emit_cloudflare_alert(page: Page) -> None:
+    """Emit structured event so the desktop UI can prompt the user to solve CF.
+
+    Also brings the Chrome tab to the foreground and starts a background thread
+    that listens for bring_to_front commands written to stdin by Tauri.
+    """
+    global _stdin_listener_started
+    _cf_page_ref[0] = page
+
     payload = {
         "type": "cloudflare_challenge",
-        "message": "Cloudflare verification required \u2014 click the checkbox in the Chrome window that just opened, then leave it alone.",
+        "message": "Human verification required \u2014 look at the Chrome window and complete the check, then leave it alone.",
     }
     print(json.dumps(payload), flush=True)
     sys.stdout.flush()
 
+    try:
+        page.bring_to_front()
+    except Exception:
+        pass
 
-def _detect_cf(page: Page) -> bool:
+    if not _stdin_listener_started:
+        _stdin_listener_started = True
+
+        def _listen():
+            while True:
+                try:
+                    line = sys.stdin.readline()
+                    if not line:
+                        break
+                    cmd = json.loads(line.strip())
+                    if cmd.get("cmd") == "bring_to_front" and _cf_page_ref[0] is not None:
+                        try:
+                            _cf_page_ref[0].bring_to_front()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+        threading.Thread(target=_listen, daemon=True).start()
+
+
+def detect_cloudflare_challenge(page: Page) -> bool:
     try:
         title = (page.title() or "").lower()
     except Exception:
@@ -43,7 +80,7 @@ def _detect_cf(page: Page) -> bool:
     return False
 
 
-def _wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
+def wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
     try:
         page.wait_for_function(
             "() => !document.title.toLowerCase().includes('just a moment') "
@@ -74,10 +111,10 @@ def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list) ->
         except Exception:
             # Download-triggered navigations raise — pdf_capture hooks still fire.
             pass
-        if _detect_cf(pdf_tab):
+        if detect_cloudflare_challenge(pdf_tab):
             print("   [OA Check] Cloudflare gate on pdfdirect — alerting user")
-            _emit_cloudflare_alert()
-            _wait_for_cf_clear(pdf_tab)
+            emit_cloudflare_alert(pdf_tab)
+            wait_for_cf_clear(pdf_tab)
         # Bail early if Wiley redirected to a login/SSO page (paywalled article)
         try:
             cur = pdf_tab.url or ""
@@ -184,10 +221,10 @@ def check_open_access(page: Page, context: BrowserContext,
     print("\n[OA Check] Checking for open-access PDF...")
 
     # Surface CF challenge on the article page itself before any attempts
-    if _detect_cf(page):
+    if detect_cloudflare_challenge(page):
         print("   [OA Check] Cloudflare gate on article page — alerting user")
-        _emit_cloudflare_alert()
-        _wait_for_cf_clear(page)
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
 
     # Wiley OA: pdfdirect streams the PDF binary, no auth needed
     if _try_wiley_pdfdirect(page, context, captured):

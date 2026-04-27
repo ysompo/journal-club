@@ -3,6 +3,7 @@ import os
 import time
 from playwright.sync_api import Page
 
+from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
 from journal_club.huji_login import wait_for_huji_and_login
 
 def _build_ovid_login_url(article_url: str) -> str:
@@ -53,6 +54,9 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
     print(f"\n[Ovid Auth] Navigating to Ovid login: {ovid_url[:60]}")
     page.goto(ovid_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
     print(f"   On: {page.url[:80]}")
 
     # If page shows "previously used institution" card, click it directly
@@ -120,6 +124,9 @@ def authenticate_ovid(page: Page, article_url: str, email: str, password: str,
     ft_url = article_url.replace("/citation/", "/fulltext/")
     page.goto(ft_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
 
     # Try to find a direct PDF URL in the DOM first
     print("\n[Ovid Auth] Extracting PDF URL from authenticated page...")

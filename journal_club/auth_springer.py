@@ -2,6 +2,7 @@
 import time
 from playwright.sync_api import Page
 
+from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 def authenticate_springer(page: Page, article_url: str, email: str, password: str,
@@ -11,6 +12,9 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
     print(f"\n[Springer Auth] Article: {article_url[:60]}")
     page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
     dismiss_cookies(page)
 
     # Extract the institutional access href directly from the DOM
@@ -29,6 +33,9 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         print(f"   [Springer] Navigating to institution access: {inst_url[:80]}")
         page.goto(inst_url, wait_until="domcontentloaded", timeout=30_000)
         time.sleep(3)
+        if detect_cloudflare_challenge(page):
+            emit_cloudflare_alert(page)
+            wait_for_cf_clear(page)
     else:
         # Fallback: build wayf URL from article URL
         encoded = quote(article_url, safe="")
@@ -36,6 +43,9 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
         print(f"   [Springer] No inst link found, navigating to wayf: {wayf_url[:80]}")
         page.goto(wayf_url, wait_until="domcontentloaded", timeout=30_000)
         time.sleep(3)
+        if detect_cloudflare_challenge(page):
+            emit_cloudflare_alert(page)
+            wait_for_cf_clear(page)
 
     print(f"   On: {page.url[:80]}")
     try:
@@ -106,6 +116,9 @@ def authenticate_springer(page: Page, article_url: str, email: str, password: st
     time.sleep(3)
     page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
 
     # Extract direct PDF URL from authenticated DOM
     print("\n[Springer] Extracting PDF URL from authenticated page...")

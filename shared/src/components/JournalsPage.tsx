@@ -349,6 +349,9 @@ export function JournalsPage({ api, isDesktop = false, openPdfExternal }: Props)
   const handleViewPdf = async (article: TocArticle) => {
     const dbId = article.pmid ? downloadedMap[article.pmid] : undefined;
     if (!dbId) { showHint("PDF not found in library yet — try again in a moment.", "error"); return; }
+    // Open the new tab synchronously to preserve the user-gesture so popup blockers
+    // (and PWA standalone mode) don't redirect into the current tab.
+    const newTab = !openPdfExternal ? window.open("", "_blank") : null;
     try {
       const blob = await api.downloadPdf(dbId);
       if (!blob || blob.size === 0) throw new Error("Empty PDF response");
@@ -357,12 +360,16 @@ export function JournalsPage({ api, isDesktop = false, openPdfExternal }: Props)
         const safeName = `${(article.title || dbId).slice(0, 60).replace(/[^a-zA-Z0-9._-]+/g, "_")}.pdf`;
         await openPdfExternal(new Uint8Array(buf), safeName);
       } else {
-        // Web fallback: open blob in a new tab
         const url = URL.createObjectURL(blob);
-        window.open(url, "_blank");
+        if (newTab) {
+          newTab.location.href = url;
+        } else {
+          window.open(url, "_blank");
+        }
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
       }
     } catch (e) {
+      if (newTab) try { newTab.close(); } catch { /* ignore */ }
       const msg = e instanceof Error ? e.message : String(e);
       showHint(`Could not open PDF: ${msg}`, "error");
     }
@@ -381,11 +388,14 @@ export function JournalsPage({ api, isDesktop = false, openPdfExternal }: Props)
 
   const getStatus = (article: TocArticle): DlStatus => {
     const item = matchQueue(article, queue);
-    if (!item) return "idle";
-    if (item.status === "queued") return "queued";
-    if (item.status === "claimed" || item.status === "downloading") return "downloading";
-    if (item.status === "done") return "done";
-    if (item.status === "failed") return "failed";
+    if (item) {
+      if (item.status === "queued") return "queued";
+      if (item.status === "claimed" || item.status === "downloading") return "downloading";
+      if (item.status === "done") return "done";
+      if (item.status === "failed") return "failed";
+    }
+    // Fall back to library: if we already have a downloaded PDF for this article, treat as done.
+    if (article.pmid && downloadedMap[article.pmid]) return "done";
     return "idle";
   };
 

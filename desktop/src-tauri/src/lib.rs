@@ -122,6 +122,15 @@ fn cancel_download(queue_item_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn bring_download_to_front(queue_item_id: String) -> Result<(), String> {
+    let mut map = download_children().lock().map_err(|e| e.to_string())?;
+    if let Some(child) = map.get_mut(&queue_item_id) {
+        child.write(b"{\"cmd\":\"bring_to_front\"}\n").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), String> {
     // Persistent per-user Playwright browser cache. Survives app updates so
     // Chromium is only downloaded on first run.
@@ -218,6 +227,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_download,
             cancel_download,
+            bring_download_to_front,
             open_pdf_external,
             get_huji_credentials,
             save_huji_credentials,

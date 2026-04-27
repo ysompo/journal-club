@@ -1,42 +1,10 @@
 # journal_club/auth_openathens.py
-import json
 import re
-import sys
 import time
 from urllib.parse import urlparse, quote
 from playwright.sync_api import Page
 
-
-def _detect_cloudflare_challenge(page: Page) -> bool:
-    """Return True if the current page is gated by a Cloudflare challenge."""
-    try:
-        title = (page.title() or "").lower()
-    except Exception:
-        title = ""
-    if "just a moment" in title or "cloudflare" in title:
-        return True
-    try:
-        if page.locator("input[name='cf-turnstile-response']").count() > 0:
-            return True
-    except Exception:
-        pass
-    try:
-        if page.locator("iframe[src*='challenges.cloudflare.com']").count() > 0:
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _emit_cloudflare_alert() -> None:
-    """Emit a structured event the desktop app picks up to show a modal."""
-    payload = {
-        "type": "cloudflare_challenge",
-        "message": "Cloudflare verification required \u2014 click the checkbox in the Chrome window that just opened, then leave it alone.",
-    }
-    print(json.dumps(payload), flush=True)
-    sys.stdout.flush()
-
+from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 from journal_club.pdf_capture import wait_for_pdf
 
@@ -178,18 +146,13 @@ def _select_huji_on_wayfinder(page: Page, _retry: bool = False) -> None:
     # the autocomplete API — surface that to the user instead of silently
     # giving up. _retry guards against infinite recursion if CF clears but
     # something else is still wrong.
-    if not _retry and _detect_cloudflare_challenge(page):
+    if not _retry and detect_cloudflare_challenge(page):
         print("   [OA] Cloudflare challenge detected on wayfinder — alerting user")
-        _emit_cloudflare_alert()
-        try:
-            page.wait_for_function(
-                "() => !document.title.toLowerCase().includes('just a moment') "
-                "&& !document.querySelector('iframe[src*=\"challenges.cloudflare.com\"]')",
-                timeout=90_000,
-            )
+        emit_cloudflare_alert(page)
+        if wait_for_cf_clear(page):
             print("   [OA] Cloudflare challenge cleared — re-entering wayfinder selection")
             return _select_huji_on_wayfinder(page, _retry=True)
-        except Exception:
+        else:
             print("   [OA] Cloudflare challenge not cleared in 90s")
 
     print("   [OA] Could not find HUJI in results — may need manual selection")

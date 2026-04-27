@@ -2,6 +2,7 @@
 import time
 from playwright.sync_api import Page
 
+from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 # Domains that indicate we've reached an auth/IdP page
@@ -92,6 +93,9 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     except Exception:
         pass
     time.sleep(2)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
 
     # If the Chrome extension already captured the PDF (cached session), skip auth entirely
     if captured:
@@ -183,6 +187,9 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
                 except Exception:
                     pass
                 time.sleep(2)
+                if detect_cloudflare_challenge(page):
+                    emit_cloudflare_alert(page)
+                    wait_for_cf_clear(page)
                 print(f"   [Elsevier] After fulltext nav: {page.url[:80]}")
             except Exception as e:
                 print(f"   [Elsevier] Fulltext nav error (may be redirect): {e}")
@@ -335,6 +342,9 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
         except Exception:
             pass
         time.sleep(2)
+        if detect_cloudflare_challenge(page):
+            emit_cloudflare_alert(page)
+            wait_for_cf_clear(page)
 
         # Navigate to article — guard against being interrupted by OAuth callback
         try:

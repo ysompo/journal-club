@@ -217,6 +217,7 @@ function App() {
       {cloudflareAlert && (
         <CloudflareAlertModal
           message={cloudflareAlert.message}
+          queueItemId={cloudflareAlert.queueItemId}
           onDismiss={clearCloudflareAlert}
         />
       )}

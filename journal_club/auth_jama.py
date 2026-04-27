@@ -3,6 +3,7 @@ import time
 from urllib.parse import quote
 from playwright.sync_api import Page
 
+from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 def _build_shibboleth_url(article_url: str) -> str:
@@ -65,6 +66,9 @@ def authenticate_jama(page: Page, article_url: str, email: str, password: str,
     print(f"\n[JAMA Auth] Navigating to Shibboleth URL...")
     page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(2)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
     print(f"   On: {page.url[:80]}")
 
     _select_huji_on_jama(page)
@@ -100,6 +104,9 @@ def authenticate_jama(page: Page, article_url: str, email: str, password: str,
     ft_url = article_url.replace("article-abstract", "fullarticle")
     page.goto(ft_url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(3)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
 
     # Extract the direct PDF URL from the authenticated fullarticle DOM
     print("\n[JAMA Auth] Extracting PDF URL from authenticated page...")
