@@ -30,3 +30,14 @@ pwa/.next/
 pwa/node_modules/
 desktop/node_modules/
 shared/node_modules/
+
+# Build artifacts
+build/
+dist/
+desktop/src-tauri/sidecar/build/
+desktop/tsconfig.tsbuildinfo
+desktop/tsconfig.node.tsbuildinfo
+desktop/vite.config.d.ts
+desktop/vite.config.js
+desktop/~/
+jc-download.spec

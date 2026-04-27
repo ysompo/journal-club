@@ -31,6 +31,124 @@ def find_chrome(override: str = "") -> str:
     return None  # Return None instead of raising — Playwright will use bundled Chromium
 
 
+# Profile subpaths whose mutations (cookies, encryption keys, login state)
+# we want to persist back from the per-job clone to the master profile.
+_PERSIST_PATHS = [
+    "Local State",
+    os.path.join("Default", "Cookies"),
+    os.path.join("Default", "Cookies-journal"),
+    os.path.join("Default", "Network", "Cookies"),
+    os.path.join("Default", "Network", "Cookies-journal"),
+    os.path.join("Default", "Login Data"),
+    os.path.join("Default", "Preferences"),
+]
+
+# Skip these on clone — large transient caches add seconds to the copy.
+# We also skip Sessions/* and Current/Last Tabs/Session files so Chrome doesn't
+# auto-restore stale tabs (e.g. a leftover sciencedirect PDF) into every job.
+_CLONE_IGNORE = {
+    "Cache", "Code Cache", "GPUCache", "ShaderCache", "GrShaderCache",
+    "Service Worker", "DawnGraphiteCache", "DawnWebGPUCache",
+    "Crashpad", "BrowserMetrics", "Storage",
+    "Sessions",
+    "Current Tabs", "Current Session", "Last Tabs", "Last Session",
+}
+
+
+def _clone_profile(src: str, dst: str) -> None:
+    """Shallow-copy the JC master profile to dst, skipping bulky caches and
+    session-restore files."""
+    import shutil
+    if not os.path.exists(src):
+        return
+    def _ignore(_dir, names):
+        return [n for n in names if n in _CLONE_IGNORE]
+    shutil.copytree(src, dst, ignore=_ignore, dirs_exist_ok=True)
+    # Belt-and-suspenders: even if a Sessions file slipped through, nuke it.
+    default_dir = os.path.join(dst, "Default")
+    for rel in ("Current Tabs", "Current Session", "Last Tabs", "Last Session"):
+        try:
+            p = os.path.join(default_dir, rel)
+            if os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
+    sessions_dir = os.path.join(default_dir, "Sessions")
+    if os.path.isdir(sessions_dir):
+        try:
+            shutil.rmtree(sessions_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _persist_profile(src: str, dst: str) -> None:
+    """Copy auth-relevant files from the per-job clone back to master."""
+    import shutil
+    for rel in _PERSIST_PATHS:
+        s = os.path.join(src, rel)
+        if not os.path.exists(s):
+            continue
+        d = os.path.join(dst, rel)
+        try:
+            os.makedirs(os.path.dirname(d), exist_ok=True)
+            shutil.copy2(s, d)
+        except Exception as e:
+            logger.debug(f"[Browser] persist {rel}: {e}")
+
+
+def _mark_profile_clean_exit(profile_dir: str) -> None:
+    """Rewrite Preferences so Chrome doesn't show the 'Restore pages?' bubble.
+
+    When a Chrome session is killed (lockfile collision, taskkill), Preferences
+    keeps `exit_type: "Crashed"`. On next launch the crash-restore bubble blocks
+    HUJI auto-fill. Resetting to a clean exit suppresses it.
+    """
+    prefs_path = os.path.join(profile_dir, "Default", "Preferences")
+    if not os.path.exists(prefs_path):
+        return
+    try:
+        with open(prefs_path, "r", encoding="utf-8") as f:
+            prefs = json.load(f)
+        profile = prefs.setdefault("profile", {})
+        profile["exit_type"] = "Normal"
+        profile["exited_cleanly"] = True
+        # Force "open new tab" startup; clear any pinned restore URLs so a
+        # stale sciencedirect tab can't reappear on next launch.
+        session = prefs.setdefault("session", {})
+        session["restore_on_startup"] = 5  # 5 = open new tab page
+        session["urls_to_restore_on_startup"] = []
+        session["startup_urls"] = []
+        with open(prefs_path, "w", encoding="utf-8") as f:
+            json.dump(prefs, f)
+    except Exception as e:
+        logger.debug(f"[Browser] could not mark profile clean: {e}")
+
+
+def _wait_for_profile_unlock(profile_dir: str, timeout: float = 3.0) -> bool:
+    """Poll until the SQLite Cookies file is openable for write (or timeout).
+
+    On Windows, killing chrome.exe doesn't immediately release file handles;
+    cloning while a handle is still held copies an empty/locked file. We retry
+    a brief read+write probe on Cookies-journal until it succeeds or we hit
+    the deadline.
+    """
+    target = os.path.join(profile_dir, "Default", "Network", "Cookies-journal")
+    if not os.path.exists(target):
+        # Nothing to wait for — caller can clone immediately.
+        return True
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with open(target, "rb"):
+                pass
+            with open(target, "ab"):
+                pass
+            return True
+        except OSError:
+            time.sleep(0.15)
+    return False
+
+
 def _ensure_pdf_download_preference(profile_dir: str) -> None:
     """
     Set Chrome's 'always_open_pdf_externally' preference so PDFs are downloaded
@@ -227,17 +345,25 @@ def _wait_for_cdp(port: int, timeout: float = 20.0) -> None:
 
 def _spawn_chrome_with_cdp(chrome_path: str, profile_dir: str, port: int,
                            start_url: str = "about:blank") -> subprocess.Popen:
-    """Spawn user-visible Chrome with a remote debugging port."""
+    """Spawn user-visible Chrome with a remote debugging port.
+
+    Always launches with about:blank — passing a target URL on the command line
+    interacts badly with cloned profiles (occasionally re-triggers session
+    restore). The auth flow does its own page.goto() once attached.
+    """
+    _mark_profile_clean_exit(profile_dir)
     args = [
         chrome_path,
         f"--remote-debugging-port={port}",
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--hide-crash-restore-bubble",
+        "--disable-features=TranslateUI,Translate,InfiniteSessionRestore",
         "--disable-popup-blocking",
-        "--disable-features=TranslateUI,Translate",
         "--disable-translate",
-        start_url,
+        "--restore-last-session=false",
+        "about:blank",
     ]
     creationflags = 0
     if os.name == "nt":
@@ -277,21 +403,48 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
 
     chrome_proc: subprocess.Popen | None = None
     temp_profile: str | None = None
+    master_profile: str | None = None
 
     if use_real_chrome:
         # Dedicated JC profile under LocalAppData so HUJI cookies persist
         # across app updates and don't conflict with the user's real Chrome.
         if profile_dir:
-            active_profile = profile_dir
+            master_profile = profile_dir
         else:
             local_appdata = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-            active_profile = os.path.join(local_appdata, "JournalClub", "chrome-profile")
+            master_profile = os.path.join(local_appdata, "JournalClub", "chrome-profile")
+        os.makedirs(master_profile, exist_ok=True)
+
+        # Clone the master profile to a per-job temp dir so concurrent
+        # downloads can't collide on Chrome's SingletonLock / lockfile.
+        # We copy back the cookie stores at the end to preserve session.
+        temp_profile = tempfile.mkdtemp(prefix="jc-chrome-job-")
+        active_profile = temp_profile
+        # Kill any stale Chrome holding the master profile open — otherwise
+        # Cookies/Sessions files are locked and the clone copies an empty
+        # profile, which loses the PDF-download preference and forces Chrome
+        # to open PDFs in its built-in viewer instead of triggering downloads.
         try:
-            os.makedirs(active_profile, exist_ok=True)
+            _kill_chrome_with_profile(master_profile)
+        except Exception:
+            pass
+        # Wait briefly for Windows to release the SQLite handles before cloning
+        # — otherwise WinError 32 leaves us with an empty profile.
+        try:
+            if not _wait_for_profile_unlock(master_profile, timeout=3.0):
+                logger.warning("[Browser] master profile still locked after 3s, cloning anyway")
+        except Exception:
+            pass
+        try:
+            _clone_profile(master_profile, active_profile)
+        except Exception as e:
+            logger.warning(f"[Browser] profile clone failed, using empty profile: {e}")
+        try:
             _cleanup_chromium_locks(active_profile)
         except Exception:
             pass
-        logger.info(f"[Browser] CDP attach: Chrome={chrome_path} profile={active_profile}")
+        _ensure_pdf_download_preference(active_profile)
+        logger.info(f"[Browser] CDP attach: Chrome={chrome_path} cloned profile={active_profile}")
     else:
         temp_profile = tempfile.mkdtemp(prefix="jc-chrome-")
         active_profile = temp_profile
@@ -380,6 +533,17 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
             # Clean up any remaining chrome.exe children using this profile.
             try:
                 _kill_chrome_with_profile(active_profile)
+            except Exception:
+                pass
+        if use_real_chrome and master_profile and temp_profile:
+            try:
+                _persist_profile(temp_profile, master_profile)
+            except Exception as e:
+                logger.warning(f"[Browser] persist back failed: {e}")
+            # Belt-and-suspenders: kill any chrome.exe still holding either the
+            # active clone OR the master profile, so the next download starts clean.
+            try:
+                _kill_chrome_with_profile(master_profile)
             except Exception:
                 pass
         if temp_profile:

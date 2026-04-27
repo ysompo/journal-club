@@ -93,6 +93,23 @@ pub struct DownloadCmd {
 }
 
 #[tauri::command]
+fn open_pdf_external(app: tauri::AppHandle, bytes: Vec<u8>, filename: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let safe = filename
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let name = if safe.to_lowercase().ends_with(".pdf") { safe } else { format!("{}.pdf", safe) };
+    let dir = std::env::temp_dir().join("jc_pdf_view");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(&name);
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn cancel_download(queue_item_id: String) -> Result<(), String> {
     let child_opt = {
         let mut map = download_children().lock().map_err(|e| e.to_string())?;
@@ -157,13 +174,13 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
-                    let _ = app.emit("download-progress", String::from_utf8_lossy(&line).to_string());
+                    let _ = app.emit(&format!("download-progress-{}", qid), String::from_utf8_lossy(&line).to_string());
                 }
                 CommandEvent::Stderr(line) => {
-                    let _ = app.emit("download-stderr", String::from_utf8_lossy(&line).to_string());
+                    let _ = app.emit(&format!("download-stderr-{}", qid), String::from_utf8_lossy(&line).to_string());
                 }
                 CommandEvent::Error(e) => {
-                    let _ = app.emit("download-error", e);
+                    let _ = app.emit(&format!("download-error-{}", qid), e);
                     break;
                 }
                 CommandEvent::Terminated(payload) => {
@@ -176,7 +193,7 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                             ),
                             "step": "process"
                         });
-                        let _ = app.emit("download-progress", msg.to_string());
+                        let _ = app.emit(&format!("download-progress-{}", qid), msg.to_string());
                     }
                     break;
                 }
@@ -201,6 +218,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_download,
             cancel_download,
+            open_pdf_external,
             get_huji_credentials,
             save_huji_credentials,
             clear_huji_credentials,

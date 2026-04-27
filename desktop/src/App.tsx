@@ -1,5 +1,6 @@
 import "./App.css";
 import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { LoginScreen } from "./components/LoginScreen";
@@ -7,6 +8,7 @@ import { HujiSetupScreen } from "./components/HujiSetupScreen";
 import { ServerSetupScreen } from "./components/ServerSetupScreen";
 import { DownloadPanel } from "./components/DownloadPanel";
 import { HujiReauthModal } from "./components/HujiReauthModal";
+import { CloudflareAlertModal } from "./components/CloudflareAlertModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { loadStoredToken, saveToken, clearToken, needsServerSetup } from "./store/auth";
 import { useKeychain } from "./hooks/useKeychain";
@@ -61,7 +63,12 @@ function App() {
 
   const onArticleReady = useCallback(() => setRefreshKey(k => k + 1), []);
 
-  const { activeDownloads, queuedItems, failedItems, retry, deleteItem, cancelItem, report, needsReauth, clearReauth } = useQueuePoller({
+  const {
+    activeDownloads, queuedItems, failedItems,
+    retry, deleteItem, cancelItem, report,
+    needsReauth, clearReauth,
+    cloudflareAlert, clearCloudflareAlert,
+  } = useQueuePoller({
     creds,
     enabled: appState === "authenticated",
     onArticleReady,
@@ -153,7 +160,16 @@ function App() {
         <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--color-surface, #fff)" }}>
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
             {currentPage === "journals" && <JournalsPage api={api} isDesktop />}
-            {currentPage === "library" && <LibraryPage api={api} refreshKey={refreshKey} onSignOut={handleSignOut} />}
+            {currentPage === "library" && (
+              <LibraryPage
+                api={api}
+                refreshKey={refreshKey}
+                onSignOut={handleSignOut}
+                openPdfExternal={async (bytes, filename) => {
+                  await invoke("open_pdf_external", { bytes: Array.from(bytes), filename });
+                }}
+              />
+            )}
             {currentPage === "bookmarks" && <BookmarksPage api={api} />}
             {currentPage === "queue" && <QueuePage api={api} />}
             {currentPage === "admin" && <div style={{ padding: "1.5rem" }}><p style={{ color: "var(--color-on-surface-variant)" }}>Admin panel — use the web interface at your server URL.</p></div>}
@@ -187,6 +203,13 @@ function App() {
             clearReauth();
           }}
           onDismiss={clearReauth}
+        />
+      )}
+
+      {cloudflareAlert && (
+        <CloudflareAlertModal
+          message={cloudflareAlert.message}
+          onDismiss={clearCloudflareAlert}
         />
       )}
     </div>

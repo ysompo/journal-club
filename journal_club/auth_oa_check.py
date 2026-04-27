@@ -28,7 +28,13 @@ _PDF_LINK_JS = """
 """
 
 def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout_s: int = 15) -> bool:
-    """Try Wiley's /doi/epdf/ pattern for open-access articles. Returns True if PDF captured."""
+    """Try Wiley's /doi/epdf/ pattern for open-access articles. Returns True if PDF captured.
+
+    /doi/epdf/ is Wiley's in-browser reader (HTML wrapper around an iframe), not
+    a PDF response. Waiting on it never captures anything. We instead navigate
+    there, look for an iframe whose src ends with .pdf, and only then drive the
+    PDF-capture code against that real PDF URL.
+    """
     url = page.url
     if "wiley.com" not in url or "/doi/" not in url:
         return False
@@ -42,17 +48,34 @@ def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout
 
     try:
         pdf_tab = context.new_page()
-        pdf_tab.goto(epdf_url, wait_until="commit", timeout=15_000)
+        pdf_tab.goto(epdf_url, wait_until="domcontentloaded", timeout=15_000)
         time.sleep(1)
 
-        # Check if we got a PDF or a redirect
-        if "pdf" in pdf_tab.url.lower() or pdf_tab.url == epdf_url:
-            if not captured:
-                wait_for_pdf(captured, timeout_s=timeout_s)
+        # Look for an embedded PDF iframe (Wiley's reader hosts the actual PDF
+        # inside it). If found, navigate the tab to that direct URL.
+        iframe_pdf = None
+        try:
+            iframe_pdf = pdf_tab.evaluate(
+                "() => { const f = document.querySelector('iframe[src*=\".pdf\"], iframe[src*=\"/pdf\"]');"
+                " return f ? f.src : null; }"
+            )
+        except Exception:
+            pass
+
+        if iframe_pdf:
+            print(f"   [OA Check] Found Wiley PDF iframe: {iframe_pdf[:80]}")
+            try:
+                pdf_tab.goto(iframe_pdf, wait_until="commit", timeout=10_000)
+            except Exception:
+                pass
+            wait_for_pdf(captured, timeout_s=30)
             pdf_tab.close()
             if captured:
-                print("   [OA Check] ✓ Wiley epdf link successful!")
+                print("   [OA Check] ✓ Wiley epdf iframe successful!")
                 return True
+        else:
+            print("   [OA Check] No PDF iframe in epdf reader — skipping wait")
+
         pdf_tab.close()
     except Exception as e:
         print(f"   [OA Check] Wiley epdf failed: {e}")
@@ -119,7 +142,11 @@ def check_open_access(page: Page, context: BrowserContext,
         page.evaluate(f"window.open('{pdf_href}', '_blank')")
 
     if not captured:
-        wait_for_pdf(captured, timeout_s=timeout_s)
+        # Atypon CDN (Wiley/NEJM/BMJ) is consistently slower than 20s on cold
+        # cache; give it more headroom before falling through to the auth flow.
+        host = (page.url or "").lower()
+        slow_atypon = any(h in host for h in ("wiley.com", "nejm.org", "bmj.com"))
+        wait_for_pdf(captured, timeout_s=45 if slow_atypon else timeout_s)
 
     if captured:
         print("   [OA Check] Open access confirmed — PDF captured!")

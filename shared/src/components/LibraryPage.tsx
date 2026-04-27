@@ -8,11 +8,13 @@ interface Props {
   onSignOut?: () => void;
   /** Desktop only: callback to open the Add Article modal */
   onAddArticle?: () => void;
+  /** Desktop only: open PDF bytes in the system viewer (sidesteps WebView2 blob/iframe CSP) */
+  openPdfExternal?: (bytes: Uint8Array, filename: string) => Promise<void>;
 }
 
 type Tab = "downloaded" | "queued";
 
-export function LibraryPage({ api, refreshKey, onSignOut, onAddArticle }: Props) {
+export function LibraryPage({ api, refreshKey, onSignOut, onAddArticle, openPdfExternal }: Props) {
   const [tab, setTab] = useState<Tab>("downloaded");
 
   // ── Downloaded tab state ───────────────────────────────────────────────────
@@ -103,6 +105,14 @@ export function LibraryPage({ api, refreshKey, onSignOut, onAddArticle }: Props)
     try {
       const blob = await api.downloadPdf(article.id);
       if (!blob || blob.size === 0) throw new Error("Empty PDF response");
+
+      if (openPdfExternal) {
+        const buf = await blob.arrayBuffer();
+        const safeName = `${(article.title || article.id).slice(0, 60).replace(/[^a-zA-Z0-9._-]+/g, "_")}.pdf`;
+        await openPdfExternal(new Uint8Array(buf), safeName);
+        return;
+      }
+
       if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       setPdfBlobUrl(URL.createObjectURL(blob));
     } catch (e) {

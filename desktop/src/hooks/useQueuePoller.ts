@@ -29,6 +29,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
   const [queuedItems, setQueuedItems] = useState<QueueItem[]>([]);
   const [failedItems, setFailedItems] = useState<QueueItem[]>([]);
   const [needsReauth, setNeedsReauth] = useState(false);
+  const [cloudflareAlert, setCloudflareAlert] = useState<{ queueItemId: string; message: string } | null>(null);
   const busyRef = useRef(false);
   const unlistenersRef = useRef<UnlistenFn[]>([]);
 
@@ -68,9 +69,14 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
         unlistenThisDownload = [];
       };
 
-      const ul1 = await listen<string>("download-progress", ev => {
+      const ul1 = await listen<string>(`download-progress-${item.id}`, ev => {
         try {
           const parsed = JSON.parse(ev.payload);
+          if (parsed.type === "cloudflare_challenge") {
+            setCloudflareAlert({ queueItemId: item.id, message: parsed.message });
+            addMsg(parsed.message);
+            return;
+          }
           if (parsed.type === "progress") addMsg(parsed.message);
           if (parsed.type === "metadata") addMsg(`Found: ${parsed.article?.title ?? "article"}`);
           if (parsed.type === "done") {
@@ -103,11 +109,11 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
         }
       });
 
-      const ul2 = await listen<string>("download-stderr", ev => {
+      const ul2 = await listen<string>(`download-stderr-${item.id}`, ev => {
         console.error("[sidecar stderr]", ev.payload);
         addMsg(`[err] ${ev.payload}`);
       });
-      const ul3 = await listen<string>("download-error", ev => {
+      const ul3 = await listen<string>(`download-error-${item.id}`, ev => {
         console.error("[sidecar error]", ev.payload);
         setActiveDownloads(prev =>
           prev.map(d => d.queueItemId === item.id ? { ...d, status: "error", errorMsg: ev.payload } : d)
@@ -256,6 +262,12 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
   }, []);
 
   const clearReauth = useCallback(() => setNeedsReauth(false), []);
+  const clearCloudflareAlert = useCallback(() => setCloudflareAlert(null), []);
 
-  return { activeDownloads, queuedItems, failedItems, retry, deleteItem, cancelItem, report, pollOnce, needsReauth, clearReauth };
+  return {
+    activeDownloads, queuedItems, failedItems,
+    retry, deleteItem, cancelItem, report, pollOnce,
+    needsReauth, clearReauth,
+    cloudflareAlert, clearCloudflareAlert,
+  };
 }

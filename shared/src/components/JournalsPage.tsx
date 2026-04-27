@@ -16,6 +16,31 @@ interface JournalState {
   loading: boolean;
   scope: Scope;
   excludedTypes?: Set<string>;
+  excludedSubspecialties?: Set<Subspecialty>;
+}
+
+type Subspecialty = "Obstetrics" | "Onco-gynecology" | "Fertility" | "Ultrasound" | "Gynecology" | "Other";
+
+const SUBSPECIALTY_ORDER: Subspecialty[] = ["Obstetrics", "Gynecology", "Onco-gynecology", "Fertility", "Ultrasound", "Other"];
+
+// Order matters: more specific patterns checked first.
+const SUBSPECIALTY_PATTERNS: Array<{ label: Subspecialty; re: RegExp }> = [
+  { label: "Onco-gynecology", re: /\b(ovarian cancer|endometrial cancer|cervical cancer|vulvar cancer|vaginal cancer|gynecolog\w* (?:onc|cancer|malignan)|gynaecolog\w* (?:onc|cancer|malignan)|trophoblastic|brca|chemo(?:therapy)?|radiotherap|carcinom|neoplas|tumou?r|lymphoma|sarcoma|metastas|cancer screening|hpv vaccin|paclitaxel|cisplatin|olaparib|bevacizumab)\b/i },
+  { label: "Fertility",       re: /\b(ivf|icsi|iui|in[- ]vitro fertili[sz]ation|art cycle|assisted reproduct|infertilit|subfertilit|oocyte|embryo(?:nic)? transfer|ovarian (?:reserve|stimulation)|amh\b|gonadotropin|fertility preservation|cryopreserv|recurrent (?:pregnancy )?loss|miscarriage|implantation failure)\b/i },
+  { label: "Ultrasound",      re: /\b(ultrasound|sonograph|doppler|nuchal translucenc|3d (?:scan|ultrasound)|biophysical profile|cervical length measurement|transvaginal scan|fetal biometry|nt scan|anomaly scan)\b/i },
+  { label: "Obstetrics",      re: /\b(pregnan|gestation|antenatal|prenatal|intrapartum|postpartum|peripartum|labou?r|deliver|cesarean|caesarean|c-section|vaginal birth|preeclamps|eclamps|gestational diabet|preterm|stillbirth|placenta(?:l|tion)?|amniotic|chorioamnioniti|fetal|foetal|neonatal|midwife|midwifery|obstetric|maternal mortality|maternal morbidity|hellp|oxytocin|epidural)\b/i },
+  { label: "Gynecology",      re: /\b(menstr|menopaus|endometrios|fibroid|leiomyoma|adenomyos|polycystic ovar|pcos|hysterectom|myomectom|laparoscop|hysteroscop|colposcop|pelvic (?:pain|floor|organ prolapse)|incontinenc|urogyn|contracept|iud|sterilization|abortion|vulvodyn|dyspareun|pap smear|cervical screen|gynecolog|gynaecolog)\b/i },
+];
+
+function classifySubspecialty(article: TocArticle): Set<Subspecialty> {
+  const text = `${article.title ?? ""} ${article.abstract ?? ""}`;
+  const labels = new Set<Subspecialty>();
+  if (!text.trim()) { labels.add("Other"); return labels; }
+  for (const { label, re } of SUBSPECIALTY_PATTERNS) {
+    if (re.test(text)) labels.add(label);
+  }
+  if (labels.size === 0) labels.add("Other");
+  return labels;
 }
 
 type DlStatus = "idle" | "queued" | "downloading" | "done" | "failed";
@@ -37,13 +62,34 @@ function saveOrder(order: string[]) {
   localStorage.setItem("jc-journal-order", JSON.stringify(order));
 }
 
+interface PendingEmailBatch { pmids: string[]; queuedAt: number; }
+
+const PENDING_KEY = "jc-pending-email-batch";
+
+function loadPendingBatch(): PendingEmailBatch | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingEmailBatch;
+    if (!parsed?.pmids?.length) return null;
+    // Drop batches older than 24h to avoid retry-forever loops
+    if (Date.now() - parsed.queuedAt > 24 * 60 * 60 * 1000) { localStorage.removeItem(PENDING_KEY); return null; }
+    return parsed;
+  } catch { return null; }
+}
+
+function savePendingBatch(batch: PendingEmailBatch) {
+  localStorage.setItem(PENDING_KEY, JSON.stringify(batch));
+}
+
+function clearPendingBatch() { localStorage.removeItem(PENDING_KEY); }
+
 export function JournalsPage({ api, isDesktop = false }: Props) {
   const [journals, setJournals] = useState<Journal[]>([]);
   const [journalStates, setJournalStates] = useState<Record<string, JournalState>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [journalOrder, setJournalOrder] = useState<string[]>(loadOrder);
   const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [downloadedMap, setDownloadedMap] = useState<Record<string, string>>({});
   const [emailSet, setEmailSet] = useState<Set<string>>(new Set());
   const [emailSending, setEmailSending] = useState(false);
   const [search, setSearch] = useState("");
@@ -75,12 +121,13 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
 
   useEffect(() => { api.getJournals().then(setJournals).catch(() => {}); }, [api]);
 
-  useEffect(() => {
-    api.getArticles({ limit: 500 }).then(r => {
+  const refreshDownloadedMap = useCallback(async () => {
+    try {
+      const r = await api.getArticles({ limit: 500 });
       const m: Record<string, string> = {};
       r.items.forEach(a => { if (a.pmid) m[a.pmid] = a.id; });
-      setDownloadedMap(m);
-    }).catch(() => {});
+      return m;
+    } catch { return {} as Record<string, string>; }
   }, [api]);
 
   // Auto-select first followed journal on initial load
@@ -97,7 +144,6 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
 
     const firstId = ordered[0];
     setSelectedId(firstId);
-    setEmailSet(new Set());
     loadTocForId(firstId, 1);
   }, [journals, selectedId, loadTocForId]);
 
@@ -109,6 +155,29 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
     const t = setInterval(refreshQueue, 15000);
     return () => clearInterval(t);
   }, [refreshQueue]);
+
+  // Pending-email batch poller: when all queued PMIDs are downloaded, send the email.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const batch = loadPendingBatch();
+      if (!batch) return;
+      const dl = await refreshDownloadedMap();
+      if (cancelled) return;
+      const ids = batch.pmids.map(p => dl[p]).filter(Boolean) as string[];
+      if (ids.length < batch.pmids.length) return;
+      try {
+        await api.emailArticles(ids);
+        clearPendingBatch();
+        showHint(`Auto-sent ${ids.length} article${ids.length > 1 ? "s" : ""} to your email ✓`);
+      } catch {
+        // Leave the batch in place; next tick will retry.
+      }
+    };
+    tick();
+    const t = setInterval(tick, 10000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [api, refreshDownloadedMap]);
 
   // ── UI helpers ───────────────────────────────────────────────────────────────
 
@@ -123,7 +192,6 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
 
   const selectJournal = useCallback((journal: Journal) => {
     setSelectedId(journal.id);
-    setEmailSet(new Set());
     const existing = journalStates[journal.id];
     if (!existing || existing.toc.length === 0) {
       loadTocForId(journal.id, existing?.scope ?? 1);
@@ -198,25 +266,75 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
     setEmailSet(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   };
 
-  const handleSendEmails = async () => {
-    if (emailSending || emailSet.size === 0) return;
-    const toc = selectedId ? (journalStates[selectedId]?.toc ?? []) : [];
+  // Flatten all loaded TOCs so a key in emailSet can be resolved to an article
+  // even when the user has navigated away from the journal it came from.
+  const flatArticleByKey = (() => {
+    const m = new Map<string, TocArticle>();
+    Object.values(journalStates).forEach(state => {
+      state.toc.forEach(a => {
+        const k = a.pmid ?? a.doi ?? a.url;
+        if (!m.has(k)) m.set(k, a);
+      });
+    });
+    return m;
+  })();
+
+  const splitSelection = (dlMap: Record<string, string>) => {
     const readyIds: string[] = [];
     const toQueue: TocArticle[] = [];
-    for (const article of toc) {
-      const key = article.pmid ?? article.doi ?? article.url;
-      if (!emailSet.has(key)) continue;
-      const dbId = article.pmid ? downloadedMap[article.pmid] : undefined;
-      if (dbId) readyIds.push(dbId); else toQueue.push(article);
-    }
+    const pendingPmids: string[] = [];
+    emailSet.forEach(key => {
+      const article = flatArticleByKey.get(key);
+      if (!article) return;
+      const dbId = article.pmid ? dlMap[article.pmid] : undefined;
+      if (dbId) readyIds.push(dbId);
+      else {
+        toQueue.push(article);
+        if (article.pmid) pendingPmids.push(article.pmid);
+      }
+    });
+    return { readyIds, toQueue, pendingPmids };
+  };
+
+  const handleSendReadyOnly = async () => {
+    if (emailSending || emailSet.size === 0) return;
     setEmailSending(true);
     try {
+      const dl = await refreshDownloadedMap();
+      const { readyIds } = splitSelection(dl);
+      if (readyIds.length === 0) { showHint("No selected articles are downloaded yet.", "error"); return; }
+      await api.emailArticles(readyIds);
+      showHint(`Sent ${readyIds.length} article${readyIds.length > 1 ? "s" : ""} to your email ✓`);
+      setEmailSet(prev => {
+        const next = new Set(prev);
+        readyIds.forEach(id => {
+          for (const [k, a] of flatArticleByKey) if (a.pmid && dl[a.pmid] === id) next.delete(k);
+        });
+        return next;
+      });
+    } catch { showHint("Could not send email — check email settings.", "error"); }
+    finally { setEmailSending(false); }
+  };
+
+  const handleSendEmails = async () => {
+    if (emailSending || emailSet.size === 0) return;
+    setEmailSending(true);
+    try {
+      const dl = await refreshDownloadedMap();
+      const { readyIds, toQueue, pendingPmids } = splitSelection(dl);
       if (readyIds.length > 0) {
         await api.emailArticles(readyIds);
         showHint(`Sent ${readyIds.length} article${readyIds.length > 1 ? "s" : ""} to your email ✓`);
       }
       for (const a of toQueue) await handleDownload(a);
-      if (toQueue.length > 0) showHint(`${toQueue.length} article(s) queued for download — email from Library when ready.`);
+      if (toQueue.length > 0) {
+        if (pendingPmids.length > 0) {
+          const existing = loadPendingBatch();
+          const merged = Array.from(new Set([...(existing?.pmids ?? []), ...pendingPmids]));
+          savePendingBatch({ pmids: merged, queuedAt: Date.now() });
+        }
+        showHint(`${toQueue.length} article(s) queued — email will go out automatically when downloads finish.`);
+      }
       setEmailSet(new Set());
     } catch { showHint("Could not send email — check email settings.", "error"); }
     finally { setEmailSending(false); }
@@ -296,7 +414,34 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
   }, {});
   const availableTypes = Object.keys(typeCounts).sort();
   const excludedTypes = (selectedId && journalStates[selectedId]?.excludedTypes) || new Set<string>();
-  const filteredToc = currentToc.filter(a => !excludedTypes.has(typeOf(a)));
+
+  // Subspecialty classification — articles can belong to multiple subspecialties
+  // (e.g. "ovarian cancer in pregnancy" → Onco-gynecology + Obstetrics).
+  const subspecialtyByKey = (() => {
+    const m = new Map<string, Set<Subspecialty>>();
+    currentToc.forEach(a => {
+      const k = a.pmid ?? a.doi ?? a.url ?? a.title;
+      m.set(k, classifySubspecialty(a));
+    });
+    return m;
+  })();
+  const subspecsOf = (a: TocArticle): Set<Subspecialty> =>
+    subspecialtyByKey.get(a.pmid ?? a.doi ?? a.url ?? a.title) ?? new Set(["Other"]);
+
+  const subspecCounts = currentToc.reduce<Record<string, number>>((acc, a) => {
+    subspecsOf(a).forEach(s => { acc[s] = (acc[s] ?? 0) + 1; });
+    return acc;
+  }, {});
+  const availableSubspecs = SUBSPECIALTY_ORDER.filter(s => (subspecCounts[s] ?? 0) > 0);
+  const excludedSubspecs = (selectedId && journalStates[selectedId]?.excludedSubspecialties) || new Set<Subspecialty>();
+
+  // Show article if at least one of its subspecialties is NOT excluded.
+  const filteredToc = currentToc.filter(a => {
+    if (excludedTypes.has(typeOf(a))) return false;
+    const labels = subspecsOf(a);
+    for (const s of labels) if (!excludedSubspecs.has(s)) return true;
+    return false;
+  });
 
   const toggleType = (t: string) => {
     if (!selectedId) return;
@@ -306,6 +451,17 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
       const next = new Set(cur.excludedTypes ?? []);
       if (next.has(t)) next.delete(t); else next.add(t);
       return { ...prev, [selectedId]: { ...cur, excludedTypes: next } };
+    });
+  };
+
+  const toggleSubspec = (s: Subspecialty) => {
+    if (!selectedId) return;
+    setJournalStates(prev => {
+      const cur = prev[selectedId];
+      if (!cur) return prev;
+      const next = new Set(cur.excludedSubspecialties ?? []);
+      if (next.has(s)) next.delete(s); else next.add(s);
+      return { ...prev, [selectedId]: { ...cur, excludedSubspecialties: next } };
     });
   };
 
@@ -444,9 +600,19 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", flexShrink: 0 }}>
                 {emailSet.size > 0 && (
-                  <button onClick={handleSendEmails} disabled={emailSending} style={S.emailSendBtn}>
-                    {emailSending ? "Sending…" : `✉ Send ${emailSet.size}`}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleSendReadyOnly}
+                      disabled={emailSending}
+                      style={{ ...S.emailSendBtn, background: "transparent", color: "var(--color-accent, #C0783A)", border: "1px solid var(--color-accent, #C0783A)" }}
+                      title="Email only the articles already downloaded — skip queueing missing ones"
+                    >
+                      Send ready only
+                    </button>
+                    <button onClick={handleSendEmails} disabled={emailSending} style={S.emailSendBtn}>
+                      {emailSending ? "Sending…" : `✉ Send ${emailSet.size}`}
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => loadTocForId(selectedJournal.id, currentScope)}
@@ -467,6 +633,21 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
                 </button>
               ))}
             </div>
+
+            {/* Subspecialty filter chips */}
+            {availableSubspecs.length > 1 && (
+              <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 0.5rem", flexWrap: "wrap" as const, alignItems: "center" }}>
+                <span style={{ fontSize: "0.7rem", color: "var(--color-text-secondary, #5A6475)", fontFamily: "'DM Mono', monospace", marginRight: "0.25rem" }}>Topic:</span>
+                {availableSubspecs.map(s => {
+                  const active = !excludedSubspecs.has(s);
+                  return (
+                    <button key={s} onClick={() => toggleSubspec(s)} style={S.scopePill(active)} title={active ? "Click to hide" : "Click to show"}>
+                      {s} ({subspecCounts[s]})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Article-type filter chips */}
             {availableTypes.length > 1 && (
