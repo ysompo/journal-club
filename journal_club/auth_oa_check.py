@@ -4,10 +4,101 @@ Open-access check: try to find + fetch a PDF link directly in the DOM.
 Must be called BEFORE any auth flow.
 Returns True if PDF was captured, False otherwise.
 """
+import json
+import re
+import sys
 import time
 from playwright.sync_api import Page, BrowserContext
 
 from journal_club.pdf_capture import wait_for_pdf
+
+
+def _emit_cloudflare_alert() -> None:
+    """Emit structured event so the desktop UI can prompt the user to solve CF."""
+    payload = {
+        "type": "cloudflare_challenge",
+        "message": "Cloudflare verification required \u2014 click the checkbox in the Chrome window that just opened, then leave it alone.",
+    }
+    print(json.dumps(payload), flush=True)
+    sys.stdout.flush()
+
+
+def _detect_cf(page: Page) -> bool:
+    try:
+        title = (page.title() or "").lower()
+    except Exception:
+        title = ""
+    if "just a moment" in title or "cloudflare" in title:
+        return True
+    try:
+        if page.locator("input[name='cf-turnstile-response']").count() > 0:
+            return True
+    except Exception:
+        pass
+    try:
+        if page.locator("iframe[src*='challenges.cloudflare.com']").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
+    try:
+        page.wait_for_function(
+            "() => !document.title.toLowerCase().includes('just a moment') "
+            "&& !document.querySelector('iframe[src*=\"challenges.cloudflare.com\"]')",
+            timeout=timeout_ms,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list) -> bool:
+    """For Wiley OA articles, /doi/pdfdirect/{doi} streams the PDF binary
+    directly without requiring institutional auth. Try this before falling
+    through to HUJI Shibboleth.
+    """
+    url = page.url
+    m = re.search(r"wiley\.com/doi/(?:abs/|full/|epdf/)?(?P<doi>10\.\d{4,9}/[^/?#]+)", url)
+    if not m:
+        return False
+    doi = m.group("doi")
+    pdfdirect = f"https://onlinelibrary.wiley.com/doi/pdfdirect/{doi}"
+    print(f"   [OA Check] Trying Wiley pdfdirect: {pdfdirect[:80]}")
+    try:
+        pdf_tab = context.new_page()
+        try:
+            pdf_tab.goto(pdfdirect, wait_until="commit", timeout=15_000)
+        except Exception:
+            # Download-triggered navigations raise — pdf_capture hooks still fire.
+            pass
+        if _detect_cf(pdf_tab):
+            print("   [OA Check] Cloudflare gate on pdfdirect — alerting user")
+            _emit_cloudflare_alert()
+            _wait_for_cf_clear(pdf_tab)
+        # Bail early if Wiley redirected to a login/SSO page (paywalled article)
+        try:
+            cur = pdf_tab.url or ""
+        except Exception:
+            cur = ""
+        if any(s in cur for s in ("/action/ssostart", "/action/showLogin", "/action/doLogin")):
+            print(f"   [OA Check] pdfdirect redirected to login ({cur[:80]}) — not OA")
+            try: pdf_tab.close()
+            except Exception: pass
+            return False
+        wait_for_pdf(captured, timeout_s=20)
+        try:
+            pdf_tab.close()
+        except Exception:
+            pass
+        if captured:
+            print("   [OA Check] \u2713 Wiley pdfdirect successful!")
+            return True
+    except Exception as e:
+        print(f"   [OA Check] Wiley pdfdirect failed: {e}")
+    return False
 
 _PDF_LINK_JS = """
 () => {
@@ -92,7 +183,17 @@ def check_open_access(page: Page, context: BrowserContext,
     """
     print("\n[OA Check] Checking for open-access PDF...")
 
-    # Try Wiley epdf pattern first
+    # Surface CF challenge on the article page itself before any attempts
+    if _detect_cf(page):
+        print("   [OA Check] Cloudflare gate on article page — alerting user")
+        _emit_cloudflare_alert()
+        _wait_for_cf_clear(page)
+
+    # Wiley OA: pdfdirect streams the PDF binary, no auth needed
+    if _try_wiley_pdfdirect(page, context, captured):
+        return True, None
+
+    # Fallback: Wiley epdf reader (rarely yields PDF iframe)
     if _try_wiley_epdf(page, context, captured, timeout_s):
         return True, None
 

@@ -6,6 +6,8 @@ import type { Journal, TocArticle, QueueItem } from "../types";
 interface Props {
   api: JournalClubApi;
   isDesktop?: boolean;
+  /** Desktop only: open PDF bytes in the system viewer */
+  openPdfExternal?: (bytes: Uint8Array, filename: string) => Promise<void>;
 }
 
 type Scope = 1 | 3 | 6 | 12;
@@ -84,12 +86,13 @@ function savePendingBatch(batch: PendingEmailBatch) {
 
 function clearPendingBatch() { localStorage.removeItem(PENDING_KEY); }
 
-export function JournalsPage({ api, isDesktop = false }: Props) {
+export function JournalsPage({ api, isDesktop = false, openPdfExternal }: Props) {
   const [journals, setJournals] = useState<Journal[]>([]);
   const [journalStates, setJournalStates] = useState<Record<string, JournalState>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [journalOrder, setJournalOrder] = useState<string[]>(loadOrder);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [downloadedMap, setDownloadedMap] = useState<Record<string, string>>({});
   const [emailSet, setEmailSet] = useState<Set<string>>(new Set());
   const [emailSending, setEmailSending] = useState(false);
   const [search, setSearch] = useState("");
@@ -126,9 +129,12 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
       const r = await api.getArticles({ limit: 500 });
       const m: Record<string, string> = {};
       r.items.forEach(a => { if (a.pmid) m[a.pmid] = a.id; });
+      setDownloadedMap(m);
       return m;
     } catch { return {} as Record<string, string>; }
   }, [api]);
+
+  useEffect(() => { refreshDownloadedMap(); }, [refreshDownloadedMap]);
 
   // Auto-select first followed journal on initial load
   useEffect(() => {
@@ -338,6 +344,28 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
       setEmailSet(new Set());
     } catch { showHint("Could not send email — check email settings.", "error"); }
     finally { setEmailSending(false); }
+  };
+
+  const handleViewPdf = async (article: TocArticle) => {
+    const dbId = article.pmid ? downloadedMap[article.pmid] : undefined;
+    if (!dbId) { showHint("PDF not found in library yet — try again in a moment.", "error"); return; }
+    try {
+      const blob = await api.downloadPdf(dbId);
+      if (!blob || blob.size === 0) throw new Error("Empty PDF response");
+      if (openPdfExternal) {
+        const buf = await blob.arrayBuffer();
+        const safeName = `${(article.title || dbId).slice(0, 60).replace(/[^a-zA-Z0-9._-]+/g, "_")}.pdf`;
+        await openPdfExternal(new Uint8Array(buf), safeName);
+      } else {
+        // Web fallback: open blob in a new tab
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showHint(`Could not open PDF: ${msg}`, "error");
+    }
   };
 
   const handleReport = async (article: TocArticle) => {
@@ -637,7 +665,7 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
             {/* Subspecialty filter chips */}
             {availableSubspecs.length > 1 && (
               <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 0.5rem", flexWrap: "wrap" as const, alignItems: "center" }}>
-                <span style={{ fontSize: "0.7rem", color: "var(--color-text-secondary, #5A6475)", fontFamily: "'DM Mono', monospace", marginRight: "0.25rem" }}>Topic:</span>
+                <span style={S.filterLabel}>Topic:</span>
                 {availableSubspecs.map(s => {
                   const active = !excludedSubspecs.has(s);
                   return (
@@ -651,7 +679,8 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
 
             {/* Article-type filter chips */}
             {availableTypes.length > 1 && (
-              <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 1.25rem", flexWrap: "wrap" as const }}>
+              <div style={{ display: "flex", gap: "0.375rem", padding: "0 2rem 1.25rem", flexWrap: "wrap" as const, alignItems: "center" }}>
+                <span style={S.filterLabel}>Type:</span>
                 {availableTypes.map(t => {
                   const active = !excludedTypes.has(t);
                   return (
@@ -689,6 +718,7 @@ export function JournalsPage({ api, isDesktop = false }: Props) {
                     onCancel={() => handleCancelDownload(article)}
                     onEmail={() => toggleEmail(article)}
                     onReport={() => handleReport(article)}
+                    onView={() => handleViewPdf(article)}
                   />
                 );
               })}
@@ -770,9 +800,9 @@ function JournalListItem({ journal, isSelected, isLoading, showReorder, canMoveU
 
 // ─── Article item ──────────────────────────────────────────────────────────────
 
-function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDownload, onCancel, onEmail, onReport }: {
+function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDownload, onCancel, onEmail, onReport, onView }: {
   article: TocArticle; status: DlStatus; queuePos: number; emailSelected: boolean; isDesktop: boolean;
-  onDownload: () => void; onCancel: () => void; onEmail: () => void; onReport: () => void;
+  onDownload: () => void; onCancel: () => void; onEmail: () => void; onReport: () => void; onView: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -788,8 +818,6 @@ function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDo
     : status === "failed" ? "var(--color-error, #9B2C2C)"
     : status === "queued" || status === "downloading" ? "var(--color-text-secondary, #5A6475)"
     : "var(--color-accent, #C0783A)";
-
-  const canAct = status === "idle" || status === "queued";
 
   return (
     <div style={{ borderBottom: "1px solid var(--color-border-light, #EDE6DA)", padding: "0.75rem 0" }}>
@@ -826,16 +854,22 @@ function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDo
             </button>
           )}
           <button
-            onClick={canAct ? (status === "idle" ? onDownload : onCancel) : undefined}
-            disabled={status === "downloading" || status === "done"}
+            onClick={
+              status === "done" ? onView
+              : status === "idle" ? onDownload
+              : status === "queued" ? onCancel
+              : undefined
+            }
+            disabled={status === "downloading"}
             style={{
               padding: "0.28rem 0.65rem", borderRadius: "0.25rem",
               border: `1px solid ${dlColor}`,
               background: status === "done" ? "var(--color-success-bg, #D4EDE2)" : status === "failed" ? "var(--color-error-bg, #F7DCDC)" : "transparent",
-              color: dlColor, cursor: canAct ? "pointer" : "default",
+              color: dlColor,
+              cursor: status === "downloading" ? "default" : "pointer",
               fontSize: "0.77rem", fontFamily: "'DM Sans', sans-serif", fontWeight: 500,
               minWidth: 74, textAlign: "center" as const,
-              opacity: status === "downloading" || status === "done" ? 0.85 : 1,
+              opacity: status === "downloading" ? 0.85 : 1,
               transition: "all 0.12s",
             }}
           >
@@ -956,6 +990,15 @@ const S = {
     cursor: "pointer", fontSize: "0.75rem",
     fontFamily: "'DM Sans', sans-serif", fontWeight: 500, transition: "all 0.15s",
   } as CSSProperties),
+
+  filterLabel: {
+    display: "inline-block",
+    width: "3.25rem",
+    fontSize: "0.75rem",
+    color: "var(--color-text-secondary, #5A6475)",
+    fontFamily: "'DM Sans', sans-serif",
+    fontWeight: 500,
+  } as CSSProperties,
 
   emptyState: {
     display: "flex", flexDirection: "column" as const, alignItems: "center", justifyContent: "center",

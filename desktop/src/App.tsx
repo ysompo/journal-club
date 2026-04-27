@@ -159,7 +159,15 @@ function App() {
 
         <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--color-surface, #fff)" }}>
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-            {currentPage === "journals" && <JournalsPage api={api} isDesktop />}
+            {currentPage === "journals" && (
+              <JournalsPage
+                api={api}
+                isDesktop
+                openPdfExternal={async (bytes, filename) => {
+                  await invoke("open_pdf_external", { bytes: Array.from(bytes), filename });
+                }}
+              />
+            )}
             {currentPage === "library" && (
               <LibraryPage
                 api={api}
