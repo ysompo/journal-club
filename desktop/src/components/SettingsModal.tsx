@@ -19,7 +19,6 @@ interface Props {
   onSaveHuji: (email: string, password: string) => Promise<void>;
 }
 
-type Theme = "light" | "dark" | "system";
 type FontSize = "small" | "medium" | "large";
 
 const btnStyle = (active: boolean): React.CSSProperties => ({
@@ -34,7 +33,6 @@ const btnStyle = (active: boolean): React.CSSProperties => ({
 });
 
 export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
-  const [theme, setTheme] = useState<Theme>("system");
   const [fontSize, setFontSize] = useState<FontSize>("medium");
   const [emails, setEmails] = useState<string[]>([]);
   const [newEmail, setNewEmail] = useState("");
@@ -71,7 +69,6 @@ export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
 
   useEffect(() => {
     api.getSettings().then(s => {
-      setTheme(s.theme as Theme);
       setFontSize(s.font_size as FontSize);
       setEmails(s.email_addresses);
       setLoading(false);
@@ -109,7 +106,7 @@ export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
     setSaving(true);
     setError(null);
     try {
-      await api.updateSettings({ theme, font_size: fontSize, email_addresses: emails });
+      await api.updateSettings({ theme: "light", font_size: fontSize, email_addresses: emails });
       onClose();
     } catch {
       setError("Failed to save settings");
@@ -156,18 +153,6 @@ export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
           <p style={{ color: "var(--color-on-surface-variant)", fontSize: "0.875rem" }}>Loading…</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-            {/* Theme */}
-            <div>
-              <span style={label}>Theme</span>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                {(["light", "dark", "system"] as Theme[]).map(t => (
-                  <button key={t} style={btnStyle(theme === t)} onClick={() => setTheme(t)}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Font size */}
             <div>
               <span style={label}>Font size</span>
