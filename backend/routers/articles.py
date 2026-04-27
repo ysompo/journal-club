@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
-import aiosqlite, uuid, os, json, shutil, base64, re, httpx
+import aiosqlite, uuid, json, base64, re, httpx
 from datetime import datetime, timezone
 
 from database import get_db
 from routers.users import get_current_user
-from config import PDF_DIR, STORAGE_LIMIT_BYTES, RESEND_API_KEY, RESEND_FROM
+from config import STORAGE_LIMIT_BYTES, GLOBAL_STORAGE_LIMIT_BYTES, RESEND_API_KEY, RESEND_FROM
+import storage
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
@@ -172,8 +173,10 @@ async def email_articles(
             article = await cur.fetchone()
         if not article or not article["pdf_on_server"] or not article["pdf_path"]:
             raise HTTPException(status_code=404, detail=f"PDF not available for article {article_id}")
-        with open(article["pdf_path"], "rb") as f:
-            content = base64.b64encode(f.read()).decode()
+        try:
+            content = base64.b64encode(storage.read(article["pdf_path"])).decode()
+        except Exception:
+            raise HTTPException(status_code=410, detail=f"PDF missing from storage for article {article_id}")
         safe_name = re.sub(r'[^\w\s-]', '', article["title"])[:60].strip().replace(" ", "_") + ".pdf"
         attachments.append({"filename": safe_name, "content": content})
         titles.append(article["title"])
@@ -214,22 +217,30 @@ async def upload_pdf(
         if not await cur.fetchone():
             raise HTTPException(status_code=404, detail="Article not found")
 
-    user_dir = os.path.join(PDF_DIR, user["id"])
-    os.makedirs(user_dir, exist_ok=True)
-    pdf_path = os.path.join(user_dir, f"{article_id}.pdf")
-
     content = await file.read()
     size = len(content)
+
+    # Global cap: refuse uploads if total across all users would exceed the
+    # safe ceiling (kept below R2 free-tier 10GB). Protects against runaway
+    # storage costs even if many users sign up.
+    async with db.execute("SELECT COALESCE(SUM(storage_bytes_used),0) AS t FROM users") as cur:
+        total_row = await cur.fetchone()
+    global_used = total_row["t"] if total_row else 0
+    if global_used + size > GLOBAL_STORAGE_LIMIT_BYTES:
+        raise HTTPException(
+            status_code=507,
+            detail="Server storage full. Contact the administrator.",
+        )
 
     if user["storage_bytes_used"] + size > STORAGE_LIMIT_BYTES:
         await _prune_oldest(user["id"], size, db)
 
-    with open(pdf_path, "wb") as f:
-        f.write(content)
+    key = storage.storage_key(user["id"], article_id)
+    storage.write(key, content)
 
     await db.execute(
         "UPDATE articles SET pdf_size_bytes=?, pdf_on_server=1, pdf_path=? WHERE id=?",
-        (size, pdf_path, article_id),
+        (size, key, article_id),
     )
     await db.execute(
         "UPDATE users SET storage_bytes_used=storage_bytes_used+? WHERE id=?",
@@ -252,7 +263,11 @@ async def download_pdf(
         row = await cur.fetchone()
     if not row or not row["pdf_on_server"]:
         raise HTTPException(status_code=404, detail="PDF not on server")
-    return FileResponse(row["pdf_path"], media_type="application/pdf")
+    try:
+        data = storage.read(row["pdf_path"])
+    except Exception:
+        raise HTTPException(status_code=410, detail="PDF missing from storage")
+    return Response(content=data, media_type="application/pdf")
 
 
 # ── Select / star ─────────────────────────────────────────────────────────────
@@ -328,8 +343,8 @@ async def delete_article(
     if not row:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    if row["pdf_path"] and os.path.exists(row["pdf_path"]):
-        os.remove(row["pdf_path"])
+    if row["pdf_path"]:
+        storage.delete(row["pdf_path"])
         await db.execute(
             "UPDATE users SET storage_bytes_used=MAX(0,storage_bytes_used-?) WHERE id=?",
             (row["pdf_size_bytes"] or 0, user["id"]),
@@ -348,9 +363,9 @@ async def _prune_oldest(user_id: str, needed_bytes: int, db: aiosqlite.Connectio
     ) as cur:
         rows = await cur.fetchall()
     for row in rows:
-        if not row["pdf_path"] or not os.path.exists(row["pdf_path"]):
+        if not row["pdf_path"]:
             continue
-        os.remove(row["pdf_path"])
+        storage.delete(row["pdf_path"])
         freed = row["pdf_size_bytes"] or 0
         await db.execute(
             "UPDATE articles SET pdf_on_server=0, pdf_path=NULL WHERE id=?", (row["id"],)

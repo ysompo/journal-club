@@ -4,12 +4,10 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@jc/shared";
 import { loadToken, clearToken } from "../lib/auth";
 
-type Theme = "light" | "dark" | "system";
 type FontSize = "small" | "medium" | "large";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [theme, setTheme] = useState<Theme>("system");
   const [fontSize, setFontSize] = useState<FontSize>("medium");
   const [emails, setEmails] = useState<string[]>([]);
   const [newEmail, setNewEmail] = useState("");
@@ -28,7 +26,6 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!loadToken()) { router.replace("/login"); return; }
     api.getSettings().then(s => {
-      setTheme(s.theme as Theme);
       setFontSize(s.font_size as FontSize);
       setEmails(s.email_addresses);
       setLoading(false);
@@ -51,7 +48,7 @@ export default function SettingsPage() {
     setError(null);
     setSaved(false);
     try {
-      await api.updateSettings({ theme, font_size: fontSize, email_addresses: emails });
+      await api.updateSettings({ theme: "light", font_size: fontSize, email_addresses: emails });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
@@ -116,20 +113,6 @@ export default function SettingsPage() {
           <p style={{ color: "var(--color-on-surface-variant)", fontSize: "0.875rem" }}>Loading…</p>
         ) : (
           <>
-            {/* Theme */}
-            <section>
-              <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", fontFamily: "var(--font-label)", color: "var(--color-on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                Theme
-              </p>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                {(["light", "dark", "system"] as Theme[]).map(t => (
-                  <button key={t} style={seg(theme === t)} onClick={() => setTheme(t)}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </section>
-
             {/* Font size */}
             <section>
               <p style={{ margin: "0 0 0.5rem", fontSize: "0.75rem", fontFamily: "var(--font-label)", color: "var(--color-on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
