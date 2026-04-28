@@ -86,6 +86,12 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     """Elsevier/ScienceDirect auth flow."""
     print(f"\n[Elsevier Auth] Article: {article_url[:60]}")
 
+    # If PDF was already captured during initial navigation (e.g. session cookies
+    # caused ScienceDirect to redirect straight to the PDF), skip auth entirely.
+    if captured:
+        print("   [Elsevier] PDF already captured before auth — skipping")
+        return
+
     # Navigate to the article page — Strategies 1-3 below handle auth from there.
     page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
     try:
@@ -310,6 +316,23 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
                         continue
                 _select_huji(page)
                 time.sleep(3)
+                # If still on id.elsevier.com (HUJI not found in search results),
+                # bypass the wayfinder entirely and navigate directly to the Shibboleth URL.
+                if 'id.elsevier.com' in page.url or 'openathens' in page.url:
+                    print("   [Elsevier] Institution select failed — using direct Shibboleth URL...")
+                    shib_url = _build_sd_institution_login(article_url)
+                    try:
+                        page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=8000)
+                        except Exception:
+                            pass
+                        time.sleep(2)
+                        if detect_cloudflare_challenge(page):
+                            emit_cloudflare_alert(page)
+                            wait_for_cf_clear(page)
+                    except Exception as _e:
+                        print(f"   [Elsevier] Shibboleth redirect error: {_e}")
             elif 'wayfinder' in current or 'openathens' in current:
                 _select_huji(page)
 
@@ -376,6 +399,66 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
             time.sleep(2)
         except Exception as e:
             print(f"   [Elsevier] Reload error: {e}")
+
+        # Check whether the PDF link is now accessible.  If the HUJI SSO completed
+        # via a cached Elsevier session (no visit to huji.ac.il), the article page
+        # may load without institutional access.  In that case force a fresh
+        # Shibboleth-based login which bypasses all cached Elsevier sessions.
+        _pdf_after_auth = False
+        try:
+            _pdf_after_auth = bool(page.evaluate("""() =>
+                !!document.querySelector(
+                    'a[href*="showPdf"], a[href*="pdfft"], a[href*="/doi/pdf"]'
+                )
+            """))
+        except Exception:
+            pass
+
+        if not _pdf_after_auth and not captured:
+            print("   [Elsevier] PDF link absent after auth — forcing fresh Shibboleth login...")
+            shib_url = _build_sd_institution_login(article_url)
+            try:
+                page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                time.sleep(2)
+                if detect_cloudflare_challenge(page):
+                    emit_cloudflare_alert(page)
+                    wait_for_cf_clear(page)
+                wait_for_huji_and_login(page, email, password)
+                try:
+                    page.wait_for_function(
+                        """() => {
+                            const u = window.location.href;
+                            return !u.includes('huji.ac.il') &&
+                                   !u.includes('shibboleth') &&
+                                   !u.includes('login');
+                        }""",
+                        timeout=90_000,
+                    )
+                except Exception:
+                    pass
+                try:
+                    page.wait_for_load_state("networkidle", timeout=20_000)
+                except Exception:
+                    pass
+                time.sleep(2)
+                page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                time.sleep(2)
+                page.reload(wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                time.sleep(2)
+            except Exception as _e:
+                print(f"   [Elsevier] Re-auth error: {_e}")
 
     print(f"   Authenticated page: {page.title()[:80]}")
 

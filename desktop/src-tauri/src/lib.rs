@@ -10,6 +10,17 @@ fn download_children() -> &'static Mutex<HashMap<String, CommandChild>> {
     CHILDREN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn chrome_pids() -> &'static Mutex<HashMap<String, u32>> {
+    static PIDS: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+    PIDS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn kill_chrome_pid(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .output();
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 struct StoredCreds {
     huji_email: String,
@@ -111,6 +122,11 @@ fn open_pdf_external(app: tauri::AppHandle, bytes: Vec<u8>, filename: String) ->
 
 #[tauri::command]
 fn cancel_download(queue_item_id: String) -> Result<(), String> {
+    // Kill the Chrome process first so it doesn't outlive the sidecar
+    let chrome_pid = chrome_pids().lock().ok().and_then(|mut m| m.remove(&queue_item_id));
+    if let Some(pid) = chrome_pid {
+        kill_chrome_pid(pid);
+    }
     let child_opt = {
         let mut map = download_children().lock().map_err(|e| e.to_string())?;
         map.remove(&queue_item_id)
@@ -183,7 +199,20 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
-                    let _ = app.emit(&format!("download-progress-{}", qid), String::from_utf8_lossy(&line).to_string());
+                    let line_str = String::from_utf8_lossy(&line).to_string();
+                    // Intercept chrome_pid messages to track Chrome for cleanup
+                    if line_str.contains("\"chrome_pid\"") {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                            if v.get("type").and_then(|t| t.as_str()) == Some("chrome_pid") {
+                                if let Some(pid) = v.get("pid").and_then(|p| p.as_u64()) {
+                                    if let Ok(mut map) = chrome_pids().lock() {
+                                        map.insert(qid.clone(), pid as u32);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let _ = app.emit(&format!("download-progress-{}", qid), line_str);
                 }
                 CommandEvent::Stderr(line) => {
                     let _ = app.emit(&format!("download-stderr-{}", qid), String::from_utf8_lossy(&line).to_string());
@@ -193,6 +222,11 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                     break;
                 }
                 CommandEvent::Terminated(payload) => {
+                    // Always clean up Chrome when the sidecar exits (normal or forced)
+                    let chrome_pid = chrome_pids().lock().ok().and_then(|mut m| m.remove(&qid));
+                    if let Some(pid) = chrome_pid {
+                        kill_chrome_pid(pid);
+                    }
                     if payload.code != Some(0) {
                         let msg = serde_json::json!({
                             "type": "error",

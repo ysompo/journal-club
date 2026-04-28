@@ -153,7 +153,7 @@ def download_article(input_str: str, cfg: Config, abort_check=None) -> tuple[Art
 
             oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
 
-            if not oa_ok:
+            if not oa_ok and not captured:
                 auth_kwargs = dict(
                     page=page,
                     article_url=article_url,

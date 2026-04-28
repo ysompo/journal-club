@@ -126,7 +126,7 @@ def attach_pdf_hooks(context: BrowserContext, page: Page) -> list:
                 pass
             return
         try:
-            resp = route.fetch(timeout=300_000)
+            resp = route.fetch(timeout=15_000)
             body = resp.body()
             ct = (resp.headers.get("content-type") or "").lower()
             if not captured and (body[:4] == b'%PDF' or "pdf" in ct):
