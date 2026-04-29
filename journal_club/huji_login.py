@@ -61,52 +61,57 @@ def dismiss_cookies(page: Page, timeout_ms: int = 3000):
 def login_huji(page: Page, email: str, password: str, manual_timeout_s: int = 20):
     """
     Assumes page is already on the HUJI IdP (idp.cc.huji.ac.il or idp.huji.ac.il).
-    Handles both the old CC IdP (email-tab flow) and the new Keycloak-based IdP.
+    Handles both the old CC IdP (tab-based: click "With E-mail password" first) and
+    the new Keycloak IdP (single form, no tabs).
     Falls back to manual wait if selectors fail.
     """
-    print(f"   [HUJI] On: {page.url[:60]}")
+    url = page.url
+    print(f"   [HUJI] On: {url[:60]}")
 
-    # Wait for a visible form field — Keycloak pages may still be loading
-    for sel in ['#username', 'input[name="username"]', 'input[type="email"]',
+    is_cc_idp = "idp.cc.huji.ac.il" in url
+
+    if is_cc_idp:
+        # CC IdP: "With temporary code" is the default tab — must click the email tab FIRST
+        # before trying to find or fill any form fields.
+        for sel in [
+            "text=With E-mail password",
+            "button:has-text('E-mail password')",
+            "a:has-text('E-mail password')",
+        ]:
+            try:
+                page.click(sel, timeout=5000)
+                print("   [HUJI] Clicked 'With E-mail password' tab")
+                time.sleep(1)
+                break
+            except Exception:
+                continue
+        # Confirm the tab switched by waiting for the password field
+        try:
+            page.wait_for_selector('input[type="password"]', state="visible", timeout=5000)
+        except Exception:
+            pass
+    else:
+        # Keycloak (idp.huji.ac.il): single-form login, no tabs — just wait for form
+        try:
+            page.wait_for_selector('#username', state="visible", timeout=8000)
+        except Exception:
+            pass
+
+    # Fill email — CC IdP uses input[type="email"], Keycloak uses #username (text type)
+    for sel in ['input[type="email"]', '#username', 'input[name="username"]',
                 'input[name="j_username"]']:
         try:
-            page.wait_for_selector(sel, state="visible", timeout=8000)
-            break
-        except Exception:
-            continue
-
-    # Click "With E-mail password" tab (old CC IdP only — silently skip on Keycloak)
-    for sel in [
-        "text=With E-mail password",
-        "button:has-text('E-mail password')",
-        "a:has-text('E-mail password')",
-        "[role='tab']:has-text('E-mail')",
-    ]:
-        try:
-            page.click(sel, timeout=3000)
-            print("   [HUJI] Clicked email tab")
-            time.sleep(1)
-            break
-        except Exception:
-            continue
-
-    # Fill username / email
-    # Keycloak uses id="username" (text type), old CC IdP uses input[type="email"]
-    for sel in ['#username', 'input[name="username"]', 'input[name="j_username"]',
-                'input[type="email"]', 'input[placeholder*="user"]',
-                'input[placeholder*="mail"]']:
-        try:
-            existing = page.input_value(sel, timeout=3000)
+            existing = page.input_value(sel, timeout=2000)
             if not existing:
                 page.fill(sel, email, timeout=3000)
-            print(f"   [HUJI] Username/email ready ({sel})")
+            print(f"   [HUJI] Email ready ({sel})")
             break
         except Exception:
             continue
 
     # Fill password
-    for sel in ['#password', 'input[name="password"]', 'input[name="j_password"]',
-                'input[type="password"]']:
+    for sel in ['input[type="password"]', '#password', 'input[name="password"]',
+                'input[name="j_password"]']:
         try:
             page.fill(sel, password, timeout=3000)
             print(f"   [HUJI] Password filled ({sel})")
@@ -114,11 +119,10 @@ def login_huji(page: Page, email: str, password: str, manual_timeout_s: int = 20
         except Exception:
             continue
 
-    # Submit — Keycloak uses id="kc-login"; old CC IdP uses type="submit"
-    for sel in ['#kc-login', 'button:has-text("Sign In")', 'button:has-text("Sign in")',
-                'button:has-text("Login")', 'button:has-text("Enter")',
-                'button[type="submit"]', 'input[type="submit"]',
-                'button:has-text("Log in")']:
+    # Submit — CC IdP uses button with text "Enter"; Keycloak uses #kc-login
+    for sel in ['button:has-text("Enter")', '#kc-login', 'button[type="submit"]',
+                'input[type="submit"]', 'button:has-text("Sign In")',
+                'button:has-text("Sign in")', 'button:has-text("Log in")']:
         try:
             page.click(sel, timeout=3000)
             print(f"   [HUJI] Submitted ({sel})")

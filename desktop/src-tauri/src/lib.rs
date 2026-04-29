@@ -45,6 +45,19 @@ fn kill_chrome_profile(profile: &str) {
         .output();
 }
 
+/// Kill all chrome.exe processes whose command line contains "jc-chrome-job-".
+/// Handles the case where cancel arrives before chrome_pid JSON is emitted so
+/// neither chrome_pids nor chrome_profiles maps have an entry yet.
+fn kill_all_jc_chrome_sessions() {
+    let ps_cmd = "$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" \
+        | Where-Object {$_.CommandLine -like '*jc-chrome-job-*'}).ProcessId; \
+        if ($pids) { $pids | ForEach-Object { & taskkill /F /T /PID $_ 2>$null }; \
+        Start-Sleep -Milliseconds 500 }";
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd])
+        .output();
+}
+
 /// Bring Chrome window to the foreground using Win32 SetForegroundWindow via PowerShell.
 fn bring_chrome_to_front(pid: u32) {
     let ps_cmd = format!(
@@ -185,6 +198,8 @@ fn cancel_download(queue_item_id: String) -> Result<(), String> {
     if let Some(child) = child_opt {
         child.kill().map_err(|e| e.to_string())?;
     }
+    // Final sweep: catches any Chrome spawned before chrome_pid JSON was emitted
+    kill_all_jc_chrome_sessions();
     Ok(())
 }
 
@@ -294,6 +309,8 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                     if let Some(ref profile) = chrome_profile {
                         kill_chrome_profile(profile);
                     }
+                    // Final sweep: catches Chrome if it was spawned before chrome_pid was emitted
+                    kill_all_jc_chrome_sessions();
                     if payload.code != Some(0) {
                         let msg = serde_json::json!({
                             "type": "error",

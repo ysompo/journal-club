@@ -36,10 +36,11 @@ _INSTITUTION_RESULT_SELS = [
 
 def _check_reader_tabs(page, captured: list) -> None:
     """Look for any open Elsevier Reader / PDF tabs and click their Download button."""
-    from journal_club.pdf_capture import wait_for_pdf as _wfp
     for p in page.context.pages:
-        if p == page or captured:
-            break
+        if p == page:
+            continue          # skip the article page itself, keep scanning other tabs
+        if captured:
+            return
         purl = p.url
         if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
                                     'showpdf', 'pdfft', '/pdf/')):
