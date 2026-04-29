@@ -124,8 +124,20 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
         print("   [Elsevier] PDF already captured before auth — skipping")
         return
 
-    # Navigate to the article page — Strategies 1-3 below handle auth from there.
-    page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
+    # Navigate to the article page only if not already there.
+    # download.py already navigated once; a duplicate goto on the same URL can
+    # trigger a second Cloudflare JS challenge round-trip that exceeds the 30 s
+    # timeout.  If we're already on sciencedirect.com, skip the goto entirely.
+    current_url = page.url
+    already_on_article = (
+        "sciencedirect.com" in current_url or
+        "elsevier.com" in current_url
+    )
+    if not already_on_article:
+        try:
+            page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
+        except Exception as _nav_e:
+            print(f"   [Elsevier] Navigation error (continuing): {_nav_e}")
     try:
         page.wait_for_load_state("networkidle", timeout=8000)
     except Exception:
