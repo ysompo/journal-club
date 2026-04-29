@@ -15,10 +15,57 @@ fn chrome_pids() -> &'static Mutex<HashMap<String, u32>> {
     PIDS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn chrome_profiles() -> &'static Mutex<HashMap<String, String>> {
+    static PROFILES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    PROFILES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn kill_chrome_pid(pid: u32) {
     let _ = std::process::Command::new("taskkill")
         .args(["/F", "/T", "/PID", &pid.to_string()])
         .output();
+}
+
+/// Kill all chrome.exe processes whose command line contains the profile directory name.
+/// More robust than PID-based kill for Chrome's multi-process architecture.
+fn kill_chrome_profile(profile: &str) {
+    let profile_name = std::path::Path::new(profile)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(profile);
+    let ps_cmd = format!(
+        "$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" \
+         | Where-Object {{$_.CommandLine -like '*{}*'}}).ProcessId; \
+         if ($pids) {{ $pids | ForEach-Object {{ & taskkill /F /T /PID $_ 2>$null }}; \
+         Start-Sleep -Milliseconds 800 }}",
+        profile_name.replace('\'', "\\'")
+    );
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+        .output();
+}
+
+/// Bring Chrome window to the foreground using Win32 SetForegroundWindow via PowerShell.
+fn bring_chrome_to_front(pid: u32) {
+    let ps_cmd = format!(
+        "Add-Type -TypeDefinition @'\n\
+         using System;\n\
+         using System.Runtime.InteropServices;\n\
+         public class WinHelper {{\n\
+           [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);\n\
+           [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int n);\n\
+         }}\n\
+         '@ -Language CSharp;\n\
+         $p = Get-Process -Id {} -ErrorAction SilentlyContinue;\n\
+         if ($p -and $p.MainWindowHandle -ne 0) {{\n\
+           [WinHelper]::ShowWindow($p.MainWindowHandle, 9);\n\
+           [WinHelper]::SetForegroundWindow($p.MainWindowHandle);\n\
+         }}",
+        pid
+    );
+    let _ = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+        .spawn(); // fire-and-forget
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
@@ -122,10 +169,14 @@ fn open_pdf_external(app: tauri::AppHandle, bytes: Vec<u8>, filename: String) ->
 
 #[tauri::command]
 fn cancel_download(queue_item_id: String) -> Result<(), String> {
-    // Kill the Chrome process first so it doesn't outlive the sidecar
+    // Kill Chrome: try PID-based kill first, then profile-based sweep
     let chrome_pid = chrome_pids().lock().ok().and_then(|mut m| m.remove(&queue_item_id));
     if let Some(pid) = chrome_pid {
         kill_chrome_pid(pid);
+    }
+    let chrome_profile = chrome_profiles().lock().ok().and_then(|mut m| m.remove(&queue_item_id));
+    if let Some(ref profile) = chrome_profile {
+        kill_chrome_profile(profile);
     }
     let child_opt = {
         let mut map = download_children().lock().map_err(|e| e.to_string())?;
@@ -139,9 +190,16 @@ fn cancel_download(queue_item_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn bring_download_to_front(queue_item_id: String) -> Result<(), String> {
+    // Primary: use Win32 SetForegroundWindow via PowerShell (works even when
+    // Windows focus-stealing prevention blocks normal window activation).
+    if let Some(pid) = chrome_pids().lock().ok().and_then(|m| m.get(&queue_item_id).copied()) {
+        bring_chrome_to_front(pid);
+    }
+    // Secondary: write bring_to_front command to sidecar stdin so Python can
+    // also call page.bring_to_front() as a belt-and-suspenders measure.
     let mut map = download_children().lock().map_err(|e| e.to_string())?;
     if let Some(child) = map.get_mut(&queue_item_id) {
-        child.write(b"{\"cmd\":\"bring_to_front\"}\n").map_err(|e| e.to_string())?;
+        let _ = child.write(b"{\"cmd\":\"bring_to_front\"}\n"); // best-effort
     }
     Ok(())
 }
@@ -200,13 +258,18 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
             match event {
                 CommandEvent::Stdout(line) => {
                     let line_str = String::from_utf8_lossy(&line).to_string();
-                    // Intercept chrome_pid messages to track Chrome for cleanup
+                    // Intercept chrome_pid messages to track Chrome PID + profile for cleanup
                     if line_str.contains("\"chrome_pid\"") {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line_str) {
                             if v.get("type").and_then(|t| t.as_str()) == Some("chrome_pid") {
                                 if let Some(pid) = v.get("pid").and_then(|p| p.as_u64()) {
                                     if let Ok(mut map) = chrome_pids().lock() {
                                         map.insert(qid.clone(), pid as u32);
+                                    }
+                                }
+                                if let Some(profile) = v.get("profile").and_then(|p| p.as_str()) {
+                                    if let Ok(mut map) = chrome_profiles().lock() {
+                                        map.insert(qid.clone(), profile.to_string());
                                     }
                                 }
                             }
@@ -226,6 +289,10 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
                     let chrome_pid = chrome_pids().lock().ok().and_then(|mut m| m.remove(&qid));
                     if let Some(pid) = chrome_pid {
                         kill_chrome_pid(pid);
+                    }
+                    let chrome_profile = chrome_profiles().lock().ok().and_then(|mut m| m.remove(&qid));
+                    if let Some(ref profile) = chrome_profile {
+                        kill_chrome_profile(profile);
                     }
                     if payload.code != Some(0) {
                         let msg = serde_json::json!({
@@ -247,6 +314,8 @@ async fn start_download(app: tauri::AppHandle, cmd: DownloadCmd) -> Result<(), S
         if let Ok(mut map) = download_children().lock() {
             map.remove(&qid);
         }
+        let _ = chrome_pids().lock().ok().map(|mut m| m.remove(&qid));
+        let _ = chrome_profiles().lock().ok().map(|mut m| m.remove(&qid));
     });
 
     Ok(())

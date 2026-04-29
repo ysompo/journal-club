@@ -34,6 +34,37 @@ _INSTITUTION_RESULT_SELS = [
 ]
 
 
+def _check_reader_tabs(page, captured: list) -> None:
+    """Look for any open Elsevier Reader / PDF tabs and click their Download button."""
+    from journal_club.pdf_capture import wait_for_pdf as _wfp
+    for p in page.context.pages:
+        if p == page or captured:
+            break
+        purl = p.url
+        if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
+                                    'showpdf', 'pdfft', '/pdf/')):
+            print(f"   [Elsevier] Found reader/PDF tab: {purl[:80]}")
+            try:
+                p.wait_for_load_state("domcontentloaded", timeout=8000)
+            except Exception:
+                pass
+            for dl_sel in [
+                "a[href*='pdfft']",
+                "a[href*='showPdf']",
+                "button[aria-label='Download PDF']",
+                "button[title='Download']",
+                "button:has-text('Download')",
+                "a:has-text('Download')",
+                "#download-btn",
+            ]:
+                try:
+                    p.click(dl_sel, timeout=5000)
+                    print(f"   [Elsevier] Clicked reader download: {dl_sel}")
+                    break
+                except Exception:
+                    continue
+
+
 def _select_huji(page: Page) -> None:
     """Type HUJI into an institution search box and click the result."""
     dismiss_cookies(page)
@@ -603,32 +634,22 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
                 print("   [Elsevier] window.open blocked/timed-out — route interceptor may still capture")
 
         if not captured:
-            if wait_for_pdf(captured, timeout_s=120, output_dir=output_dir):
-                pass  # captured via route interception, response hook, or download hook
-            else:
-                # Check if an Elsevier Reader or PDF viewer tab is open
-                print("   [Elsevier] PDF not captured — checking open tabs...")
-                for p in page.context.pages:
-                    if p == page:
-                        continue
-                    purl = p.url
-                    print(f"   [Elsevier] Open tab: {purl[:80]}")
-                    if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
-                                                'showpdf', 'pdfft', '/pdf/')):
-                        print(f"   [Elsevier] Found PDF/Reader tab, trying Download button...")
-                        for dl_sel in ["button[title='Download']", "button:has-text('Download')",
-                                       "a:has-text('Download')", "#download-btn"]:
-                            try:
-                                p.click(dl_sel, timeout=5000)
-                                print(f"   [Elsevier] Clicked reader download: {dl_sel}")
-                                break
-                            except Exception:
-                                continue
+            # First check immediately (after a brief settle) for any reader/PDF tabs
+            # that opened when the link was clicked — don't wait 120s before looking.
+            time.sleep(6)
+            if not captured:
+                _check_reader_tabs(page, captured)
+            if not captured:
+                wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
+            if not captured:
+                _check_reader_tabs(page, captured)
                 wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
     else:
         # ── Strategy 2: no href found — try clicking PDF buttons ───────────────
         # Used for ScienceDirect articles where the PDF button may be a <button>
-        # that navigates or posts a form rather than having an href.
+        # that opens a reader tab rather than triggering a direct download.
+        # Do NOT use expect_download() — clicking "View PDF" opens reader.elsevier.com
+        # (an HTML reader, not a PDF download), causing a 30s timeout with no event.
         print("   [Elsevier] No PDF href in DOM — trying button clicks...")
 
         _pdf_link_sels = [
@@ -642,51 +663,20 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
 
         clicked = False
         for sel in _pdf_link_sels:
-            click_succeeded = False
             try:
-                with page.expect_download(timeout=30_000) as dl_info:
-                    page.click(sel, timeout=5000)
-                    click_succeeded = True
-                    print(f"   [Elsevier] Clicked: {sel}")
-                dl = dl_info.value
-                tmp_path = _os.path.join(_tmp.mkdtemp(), dl.suggested_filename or "article.pdf")
-                print(f"   [Elsevier] Saving download: {dl.suggested_filename}")
-                dl.save_as(tmp_path)
-                with open(tmp_path, "rb") as f:
-                    body = f.read()
-                if body[:4] == b'%PDF':
-                    captured.append(body)
-                    print(f"   [Elsevier] ✓ PDF via download: {len(body):,} bytes")
-                else:
-                    print(f"   [Elsevier] Downloaded file not PDF (starts: {body[:30]!r})")
+                page.click(sel, timeout=5000)
+                print(f"   [Elsevier] Clicked: {sel}")
                 clicked = True
                 break
-            except _PlaywrightTimeout:
-                if click_succeeded:
-                    print(f"   [Elsevier] No download event for {sel} — using response hooks")
-                    clicked = True
-                    break
-                else:
-                    continue   # element not found, try next
             except Exception:
                 continue
 
         if clicked and not captured:
-            if not wait_for_pdf(captured, timeout_s=60, output_dir=output_dir):
-                print("   [Elsevier] PDF not captured — checking Reader page...")
-                for p in page.context.pages:
-                    if p == page:
-                        continue
-                    purl = p.url
-                    if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets', 'pdf')):
-                        print(f"   [Elsevier] Found Reader page: {purl[:80]}")
-                        for dl_sel in ["button[title='Download']", "button:has-text('Download')",
-                                       "a:has-text('Download')", "#download-btn"]:
-                            try:
-                                p.click(dl_sel, timeout=5000)
-                                print(f"   [Elsevier] Clicked reader download: {dl_sel}")
-                                break
-                            except Exception:
-                                continue
-                        break
+            # Give the click a moment to open a tab or trigger a response
+            time.sleep(6)
+            _check_reader_tabs(page, captured)
+            if not captured:
+                wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
+            if not captured:
+                _check_reader_tabs(page, captured)
                 wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)

@@ -456,9 +456,10 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                 cdp_port = port or _find_free_port()
                 print(f"   [Browser] Spawning Chrome on CDP port {cdp_port}...")
                 chrome_proc = _spawn_chrome_with_cdp(chrome_path, active_profile, cdp_port, start_url)
-                # Emit PID immediately so the Tauri host can kill Chrome if the
+                # Emit PID + profile so the Tauri host can kill Chrome if the
                 # sidecar is force-terminated (Python finally blocks won't run).
-                print(json.dumps({"type": "chrome_pid", "pid": chrome_proc.pid}), flush=True)
+                print(json.dumps({"type": "chrome_pid", "pid": chrome_proc.pid,
+                                  "profile": active_profile}), flush=True)
                 _wait_for_cdp(cdp_port)
                 browser: Browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
                 # Persistent profile gives us a default context already.
