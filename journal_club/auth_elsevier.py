@@ -79,15 +79,22 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
     # new tab has no warm session. The main page already has auth cookies + CF standing.
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # Remove target="_blank" so the click stays in the main page.
-        # page.goto() sends no Referer and triggers Elsevier's bot-detection.
-        # A click from the article page sends the correct Referer header.
-        print(f"   [Elsevier] Clicking PDF link in-page (removing target): {pdf_href[:80]}")
+        # Keep navigation in the main page so the Referer header is the article URL.
+        # ScienceDirect's PDF button may use window.open() rather than <a target="_blank">,
+        # so we override both: remove target attributes AND redirect window.open to
+        # window.location so no second tab opens.
+        print(f"   [Elsevier] Clicking PDF link in-page (intercept window.open): {pdf_href[:80]}")
         try:
-            page.evaluate(
-                "() => document.querySelectorAll('a[href*=\"pdfft\"], a[href*=\"showPdf\"],"
-                " a[href*=\"/doi/pdf\"]').forEach(el => el.removeAttribute('target'))"
-            )
+            page.evaluate("""
+                () => {
+                    // Redirect any window.open call to the current tab
+                    window.open = (url) => { if (url) window.location.href = url; };
+                    // Also strip target="_blank" in case it's a plain link
+                    document.querySelectorAll(
+                        'a[href*="pdfft"], a[href*="showPdf"], a[href*="/doi/pdf"]'
+                    ).forEach(el => el.removeAttribute('target'));
+                }
+            """)
         except Exception:
             pass
         try:
