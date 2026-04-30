@@ -85,11 +85,27 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         except Exception as e:
             # Download-triggered navigations raise — pdf_capture hooks still fire.
             print(f"   [Elsevier] PDF nav raised (expected for download): {e}")
+
+        # Check for a visible CF challenge first
         if detect_cloudflare_challenge(page):
             print("   [Elsevier] CF challenge on PDF page — alerting user")
             emit_cloudflare_alert(page)
             wait_for_cf_clear(page)
-        wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
+            wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+            return bool(captured)
+
+        # Short wait — if it's a clean PDF response, capture fires almost immediately
+        wait_for_pdf(captured, timeout_s=15, output_dir=output_dir)
+
+        if not captured:
+            # CF sometimes hard-blocks without a visible challenge (no "Just a Moment"
+            # page, no iframe) — just a silent redirect. Bring Chrome to front so the
+            # user can complete any invisible verification or click through manually.
+            print("   [Elsevier] PDF not captured after 15s — prompting user to check Chrome")
+            emit_cloudflare_alert(page)
+            wait_for_cf_clear(page, timeout_ms=120_000)
+            wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+
         return bool(captured)
 
     # Fallback: click the button (may open new tab or trigger download directly)
