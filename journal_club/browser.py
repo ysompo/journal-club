@@ -527,14 +527,18 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
     finally:
         if chrome_proc is not None:
             try:
-                chrome_proc.terminate()
-                try:
-                    chrome_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    chrome_proc.kill()
+                # taskkill /F /T kills the full process tree (renderer, GPU, utility).
+                # terminate() only sends SIGTERM to the parent and orphans children on Windows.
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(chrome_proc.pid)],
+                    capture_output=True, timeout=10,
+                )
             except Exception:
-                pass
-            # Clean up any remaining chrome.exe children using this profile.
+                try:
+                    chrome_proc.kill()
+                except Exception:
+                    pass
+            # Belt-and-suspenders: kill any chrome.exe still referencing this profile.
             try:
                 _kill_chrome_with_profile(active_profile)
             except Exception:

@@ -48,8 +48,25 @@ def _pdf_button(page: Page) -> str | None:
     return None
 
 
+def _get_pdf_href(page: Page, sel: str) -> str | None:
+    """Extract the href from a PDF link element without clicking it."""
+    try:
+        loc = page.locator(sel).first
+        href = loc.get_attribute("href")
+        if href:
+            # Make absolute if relative
+            if href.startswith("/"):
+                from urllib.parse import urlparse
+                u = urlparse(page.url)
+                href = f"{u.scheme}://{u.netloc}{href}"
+            return href
+    except Exception:
+        pass
+    return None
+
+
 def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> bool:
-    """Click the PDF button and wait for pdf_capture to intercept the response."""
+    """Navigate the main page to the PDF URL (avoids CF blocking new tabs)."""
     from journal_club.pdf_capture import wait_for_pdf
 
     sel = _pdf_button(page)
@@ -57,6 +74,25 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         print("   [Elsevier] No PDF button found on page")
         return False
 
+    # Extract the PDF URL first so we can navigate the main page to it directly.
+    # Opening pdfft URLs in a new tab gets hard-blocked by Cloudflare because the
+    # new tab has no warm session. The main page already has auth cookies + CF standing.
+    pdf_href = _get_pdf_href(page, sel)
+    if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
+        print(f"   [Elsevier] Navigating main page to PDF URL: {pdf_href[:80]}")
+        try:
+            page.goto(pdf_href, wait_until="commit", timeout=30_000)
+        except Exception as e:
+            # Download-triggered navigations raise — pdf_capture hooks still fire.
+            print(f"   [Elsevier] PDF nav raised (expected for download): {e}")
+        if detect_cloudflare_challenge(page):
+            print("   [Elsevier] CF challenge on PDF page — alerting user")
+            emit_cloudflare_alert(page)
+            wait_for_cf_clear(page)
+        wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
+        return bool(captured)
+
+    # Fallback: click the button (may open new tab or trigger download directly)
     try:
         page.click(sel, timeout=5000)
         print(f"   [Elsevier] Clicked PDF button: {sel}")
@@ -64,7 +100,6 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         print(f"   [Elsevier] PDF click failed ({sel}): {e}")
         return False
 
-    # Check for any reader tab that opened (ScienceDirect opens an HTML reader)
     time.sleep(5)
     _check_reader_tabs(page, captured)
     if not captured:
@@ -88,6 +123,13 @@ def _check_reader_tabs(page: Page, captured: list) -> None:
                 p.wait_for_load_state("domcontentloaded", timeout=8000)
             except Exception:
                 pass
+            # CF challenge can appear on the PDF/reader tab itself
+            if detect_cloudflare_challenge(p):
+                print("   [Elsevier] Cloudflare challenge on PDF tab — alerting user")
+                emit_cloudflare_alert(p)
+                wait_for_cf_clear(p)
+            if captured:
+                return
             for dl_sel in [
                 "a[href*='pdfft']", "a[href*='showPdf']",
                 "button[aria-label='Download PDF']", "button[title='Download']",
