@@ -79,28 +79,38 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
     # new tab has no warm session. The main page already has auth cookies + CF standing.
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        print(f"   [Elsevier] Navigating main page to PDF URL: {pdf_href[:80]}")
+        # Remove target="_blank" so the click stays in the main page.
+        # page.goto() sends no Referer and triggers Elsevier's bot-detection.
+        # A click from the article page sends the correct Referer header.
+        print(f"   [Elsevier] Clicking PDF link in-page (removing target): {pdf_href[:80]}")
         try:
-            page.goto(pdf_href, wait_until="commit", timeout=30_000)
+            page.evaluate(
+                "() => document.querySelectorAll('a[href*=\"pdfft\"], a[href*=\"showPdf\"],"
+                " a[href*=\"/doi/pdf\"]').forEach(el => el.removeAttribute('target'))"
+            )
+        except Exception:
+            pass
+        try:
+            page.click(sel, timeout=5000)
+            print(f"   [Elsevier] Clicked PDF link: {sel}")
         except Exception as e:
-            # Download-triggered navigations raise — pdf_capture hooks still fire.
-            print(f"   [Elsevier] PDF nav raised (expected for download): {e}")
+            # Navigation-triggered clicks raise when Chrome intercepts the download
+            print(f"   [Elsevier] Click raised (may be download): {e}")
 
-        # Check for a visible CF challenge first
+        # Check for a visible CF or Elsevier verification page
+        time.sleep(2)
         if detect_cloudflare_challenge(page):
-            print("   [Elsevier] CF challenge on PDF page — alerting user")
+            print("   [Elsevier] CF challenge after PDF click — alerting user")
             emit_cloudflare_alert(page)
             wait_for_cf_clear(page)
             wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
             return bool(captured)
 
-        # Short wait — if it's a clean PDF response, capture fires almost immediately
+        # Short wait — clean PDF download fires capture immediately
         wait_for_pdf(captured, timeout_s=15, output_dir=output_dir)
 
         if not captured:
-            # CF sometimes hard-blocks without a visible challenge (no "Just a Moment"
-            # page, no iframe) — just a silent redirect. Bring Chrome to front so the
-            # user can complete any invisible verification or click through manually.
+            # Elsevier verification page or invisible CF — bring Chrome to front
             print("   [Elsevier] PDF not captured after 15s — prompting user to check Chrome")
             emit_cloudflare_alert(page)
             wait_for_cf_clear(page, timeout_ms=120_000)
