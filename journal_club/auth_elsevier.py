@@ -1,111 +1,39 @@
 # journal_club/auth_elsevier.py
 import time
+from urllib.parse import quote
 from playwright.sync_api import Page
 
-from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
-from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
-
-# Domains that indicate we've reached an auth/IdP page
-_AUTH_DOMAINS = (
-    'id.elsevier.com',
-    'sciencedirect.com/user/ropc',
-    'openathens',
-    'wayfinder',
-    'huji.ac.il',
+from journal_club.auth_oa_check import (
+    detect_cloudflare_challenge, detect_elsevier_verification,
+    detect_elsevier_hardblock,
+    emit_cloudflare_alert, wait_for_cf_clear, wait_for_pdf_or_user_action,
 )
-
-_INSTITUTION_INPUT_SELS = [
-    'input[placeholder*="nstitut"]',
-    'input[placeholder*="niversit"]',
-    'input[placeholder*="rganiz"]',
-    'input[name="org"]',
-    'input[type="search"]',
-    'input[type="text"]',
-]
-
-_INSTITUTION_RESULT_SELS = [
-    "span:has-text('Hebrew University of Jerusalem')",
-    "a:has-text('Hebrew University of Jerusalem')",
-    "a:has-text('Hebrew University')",
-    "li:has-text('Hebrew University')",
-    "[role='option']:has-text('Hebrew')",
-    "button:has-text('Hebrew University')",
-    ".result:has-text('Hebrew')",
-]
-
-
-def _check_reader_tabs(page, captured: list) -> None:
-    """Look for any open Elsevier Reader / PDF tabs and click their Download button."""
-    for p in page.context.pages:
-        if p == page:
-            continue          # skip the article page itself, keep scanning other tabs
-        if captured:
-            return
-        purl = p.url
-        if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
-                                    'showpdf', 'pdfft', '/pdf/')):
-            print(f"   [Elsevier] Found reader/PDF tab: {purl[:80]}")
-            try:
-                p.wait_for_load_state("domcontentloaded", timeout=8000)
-            except Exception:
-                pass
-            for dl_sel in [
-                "a[href*='pdfft']",
-                "a[href*='showPdf']",
-                "button[aria-label='Download PDF']",
-                "button[title='Download']",
-                "button:has-text('Download')",
-                "a:has-text('Download')",
-                "#download-btn",
-            ]:
-                try:
-                    p.click(dl_sel, timeout=5000)
-                    print(f"   [Elsevier] Clicked reader download: {dl_sel}")
-                    break
-                except Exception:
-                    continue
-
-
-def _select_huji(page: Page) -> None:
-    """Type HUJI into an institution search box and click the result."""
-    dismiss_cookies(page)
-    time.sleep(1)
-    for sel in _INSTITUTION_INPUT_SELS:
-        try:
-            page.click(sel, timeout=3000)
-            page.fill(sel, "")
-            page.type(sel, "Hebrew University of Jerusalem", delay=50)
-            print(f"   [Elsevier] Typed institution into: {sel}")
-            try:
-                page.wait_for_selector(
-                    ", ".join(_INSTITUTION_RESULT_SELS), timeout=5000)
-            except Exception:
-                time.sleep(2)
-            break
-        except Exception:
-            continue
-
-    for sel in _INSTITUTION_RESULT_SELS:
-        try:
-            page.click(sel, timeout=5000)
-            print(f"   [Elsevier] Selected institution: {sel}")
-            time.sleep(2)
-            return
-        except Exception:
-            continue
-    print("   [Elsevier] Could not find HUJI in results")
-
+from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 _HUJI_ENTITY_ID = "https://idp.huji.ac.il/idp/shibboleth"
 
+_PDF_SELS = [
+    "a[href*='showPdf']",
+    "a[href*='pdfft']",
+    "a[href*='/doi/pdf']",
+    "a:has-text('View PDF')",
+    "button:has-text('View PDF')",
+    "a:has-text('Download PDF')",
+    "button:has-text('Download PDF')",
+]
+
+_HUJI_RESULT_SELS = [
+    "[role='option']:has-text('Hebrew')",
+    "li:has-text('Hebrew University')",
+    "span:has-text('Hebrew University of Jerusalem')",
+    "a:has-text('Hebrew University')",
+    "button:has-text('Hebrew University')",
+]
+
 
 def _build_sd_institution_login(article_url: str) -> str:
-    """Build ScienceDirect institutional-login URL that forces Shibboleth redirect.
-
-    Navigating here bypasses the need to find/click "Access through Hebrew
-    University" buttons that are sometimes hidden or A/B-tested away.
-    """
-    from urllib.parse import quote
+    """Build ScienceDirect institutional-login URL.
+    Reliably redirects to id.elsevier.com/as/authorization.oauth2."""
     return (
         "https://www.sciencedirect.com/user/institution/login"
         f"?entityID={quote(_HUJI_ENTITY_ID, safe='')}"
@@ -113,31 +41,355 @@ def _build_sd_institution_login(article_url: str) -> str:
     )
 
 
-def authenticate_elsevier(page: Page, article_url: str, email: str, password: str,
-                           captured: list, output_dir: str = None):
-    """Elsevier/ScienceDirect auth flow."""
-    print(f"\n[Elsevier Auth] Article: {article_url[:60]}")
+def _pdf_button(page: Page) -> str | None:
+    """Return the first visible PDF selector found on the page, or None."""
+    for sel in _PDF_SELS:
+        try:
+            if page.locator(sel).count() > 0:
+                return sel
+        except Exception:
+            pass
+    return None
 
-    # If PDF was already captured during initial navigation (e.g. session cookies
-    # caused ScienceDirect to redirect straight to the PDF), skip auth entirely.
+
+def _get_pdf_href(page: Page, sel: str) -> str | None:
+    """Extract the href from a PDF link element without clicking it."""
+    try:
+        loc = page.locator(sel).first
+        href = loc.get_attribute("href")
+        if href:
+            # Make absolute if relative
+            if href.startswith("/"):
+                from urllib.parse import urlparse
+                u = urlparse(page.url)
+                href = f"{u.scheme}://{u.netloc}{href}"
+            return href
+    except Exception:
+        pass
+    return None
+
+
+def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> bool:
+    """Click the PDF button and wait for the response. That is all.
+
+    Earlier in this debugging session we added APIRequest, urllib, in-page
+    fetch, and a stealth init script. Each of those generated requests that
+    the Elsevier WAF flag-counted, escalating from soft block to hard block
+    over many attempts. The simple click-only flow is what worked in commit
+    a988160 and earlier — and it is what works in the user is regular Chrome.
+    """
+    from journal_club.pdf_capture import wait_for_pdf
+
+    # Bail if the article page itself is the hard-block (residual WAF flag
+    # from earlier session). Wait for it to expire then retry.
+    if detect_elsevier_hardblock(page):
+        try:
+            url = page.url
+        except Exception:
+            url = "(unknown)"
+        print(f"   [Elsevier] Article page is hard-blocked — WAF flag in effect ({url[:80]})")
+        print(f"   [Elsevier] Wait several hours for the rate-limit flag to expire, then retry")
+        return False
+
+    sel = _pdf_button(page)
+    if not sel:
+        try:
+            title = page.title() or ""
+        except Exception:
+            title = ""
+        print(f"   [Elsevier] No PDF button found (title={title[:60]!r}, url={page.url[:80]!r})")
+        if title.strip() == "ScienceDirect" or detect_elsevier_hardblock(page):
+            print(f"   [Elsevier] Page looks like hard-block, not real article")
+        return False
+
+    # Capture pre-click state for diagnostics
+    try:
+        href_before = _get_pdf_href(page, sel)
+    except Exception:
+        href_before = "(unreadable)"
+    tabs_before = len(page.context.pages)
+    url_before = page.url
+    print(f"   [Elsevier] Pre-click: {tabs_before} tab(s), pdf href={href_before[:80] if href_before else None!r}")
+
+    try:
+        page.click(sel, timeout=5000)
+        print(f"   [Elsevier] Clicked PDF button: {sel}")
+    except Exception as e:
+        print(f"   [Elsevier] PDF click failed ({sel}): {e}")
+        return False
+
+    # Diagnostics: did the click do ANYTHING?
+    time.sleep(3)
+    tabs_after = len(page.context.pages)
+    try:
+        url_after = page.url
+    except Exception:
+        url_after = "(unreadable)"
+    print(f"   [Elsevier] Post-click +3s: {tabs_after} tab(s), main page url={'changed' if url_after != url_before else 'unchanged'} ({url_after[:80]})")
+
+    # If the click had no visible effect on Playwright's view (no new tab in
+    # context, main page URL unchanged), Chrome likely opened a popup tab that
+    # Playwright's CDP attach doesn't track — the response hooks miss it. Force
+    # same-tab navigation to the pdfft URL so the response goes through the
+    # tracked tab, which fires pdf_capture's response hook + S3 route hook.
+    if tabs_after == tabs_before and url_after == url_before and href_before:
+        print(f"   [Elsevier] Click had no visible effect — navigating same tab to pdfft URL")
+        try:
+            page.goto(href_before, wait_until="domcontentloaded", timeout=30_000)
+        except Exception as e:
+            # Navigation interrupted by PDF download is normal — pdf_capture
+            # hooks should still fire on the response
+            print(f"   [Elsevier] Goto raised (may be download): {e}")
+        time.sleep(2)
+
+    # Wait for capture via:
+    #  - direct PDF response intercepted by pdf_capture hooks (route hook on
+    #    pdf.sciencedirectassets.com fires when Chrome follows the redirect), or
+    #  - reader tab opened by ScienceDirect that we follow.
+    _check_reader_tabs(page, captured)
+    if not captured:
+        wait_for_pdf(captured, timeout_s=45, output_dir=output_dir)
+    if not captured:
+        _check_reader_tabs(page, captured)
+        wait_for_pdf(captured, timeout_s=20, output_dir=output_dir)
+
     if captured:
-        print("   [Elsevier] PDF already captured before auth — skipping")
+        return True
+
+    # ─── Diagnostic dump of every tab's state ────────────────────────────────
+    # We've timed out without any PDF. Dump the visible state of every tab
+    # (HTML + screenshot) so we can SEE what each page is showing instead of
+    # guessing from URLs alone. This is essential when CF runs an invisible
+    # JS challenge that hangs without a detectable widget.
+    try:
+        import tempfile, os as _os
+        diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
+        _os.makedirs(diag_dir, exist_ok=True)
+        ts = int(time.time())
+        for idx, p in enumerate(page.context.pages):
+            try:
+                p_url = p.url
+            except Exception:
+                p_url = "(unreadable)"
+            try:
+                p_title = p.title()
+            except Exception:
+                p_title = "(unreadable)"
+            label = "main" if p == page else f"tab{idx}"
+            print(f"   [Elsevier] Tab dump {label}: title={p_title[:60]!r} url={p_url[:100]!r}")
+            try:
+                html_path = _os.path.join(diag_dir, f"stuck-{ts}-{label}.html")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(p.content())
+                print(f"   [Elsevier]   HTML dumped: {html_path}")
+            except Exception as e:
+                print(f"   [Elsevier]   HTML dump failed: {e}")
+            try:
+                png_path = _os.path.join(diag_dir, f"stuck-{ts}-{label}.png")
+                p.screenshot(path=png_path, full_page=False, timeout=10_000)
+                print(f"   [Elsevier]   Screenshot: {png_path}")
+            except Exception as e:
+                print(f"   [Elsevier]   Screenshot failed: {e}")
+    except Exception as e:
+        print(f"   [Elsevier] Diagnostic dump failed: {e}")
+
+    # Last resort: if Chrome ended on a CF/Elsevier challenge page, prompt user.
+    # Check on EVERY tab, not just the original page, since CF challenges
+    # often appear on the new tab opened by the click.
+    challenge_page = None
+    for p in page.context.pages:
+        try:
+            if detect_cloudflare_challenge(p) or detect_elsevier_verification(p):
+                challenge_page = p
+                break
+        except Exception:
+            continue
+    if challenge_page is not None:
+        kind = "Cloudflare" if detect_cloudflare_challenge(challenge_page) else "Elsevier verification"
+        try:
+            cu = challenge_page.url[:80]
+        except Exception:
+            cu = "(unreadable)"
+        print(f"   [Elsevier] {kind} page detected on tab {cu!r} — prompting user")
+        emit_cloudflare_alert(challenge_page)
+        wait_for_pdf_or_user_action(captured, timeout_s=180)
+
+    return bool(captured)
+
+
+
+def _check_reader_tabs(page: Page, captured: list) -> None:
+    """Check any open tabs other than the article page for PDF or challenge content."""
+    other_tabs = [p for p in page.context.pages if p != page]
+    if not other_tabs:
+        return
+    print(f"   [Elsevier] {len(other_tabs)} other tab(s) open:")
+    for p in other_tabs:
+        try:
+            t_url = p.url
+        except Exception:
+            t_url = "(unreadable)"
+        try:
+            t_title = p.title()
+        except Exception:
+            t_title = "(unreadable)"
+        print(f"   [Elsevier]   - title={t_title[:50]!r} url={t_url[:80]!r}")
+
+    for p in other_tabs:
+        if captured:
+            return
+        try:
+            purl = p.url
+        except Exception:
+            continue
+        try:
+            p.wait_for_load_state("domcontentloaded", timeout=8000)
+        except Exception:
+            pass
+
+        # CF challenge / Elsevier hardblock can land on the new tab
+        try:
+            if detect_cloudflare_challenge(p):
+                print(f"   [Elsevier] Cloudflare challenge on tab {purl[:60]!r} — alerting user")
+                emit_cloudflare_alert(p)
+                wait_for_cf_clear(p)
+                if captured:
+                    return
+        except Exception:
+            pass
+        try:
+            if detect_elsevier_hardblock(p):
+                print(f"   [Elsevier] Hardblock on tab {purl[:60]!r}")
+                continue
+        except Exception:
+            pass
+
+        # If the tab is on a Reader / PDF URL, try clicking the embedded
+        # download button (in case Chrome's PDF viewer is showing it inline).
+        if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
+                                    'showpdf', 'pdfft', '/pdf/')):
+            for dl_sel in [
+                "a[href*='pdfft']", "a[href*='showPdf']",
+                "button[aria-label='Download PDF']", "button[title='Download']",
+                "button:has-text('Download')", "a:has-text('Download')", "#download-btn",
+            ]:
+                try:
+                    p.click(dl_sel, timeout=3000)
+                    print(f"   [Elsevier] Clicked reader download: {dl_sel}")
+                    break
+                except Exception:
+                    continue
+
+
+def _handle_elsevier_idp(page: Page) -> bool:
+    """Handle id.elsevier.com auth page.
+
+    State A: HUJI already pre-selected — click "Access through your organization".
+    State B: "Find your organization" form — type Hebrew University, select result.
+
+    Returns True if we successfully triggered a redirect toward HUJI.
+    """
+    time.sleep(2)
+    dismiss_cookies(page)
+    print(f"   [Elsevier] IdP page: {page.url[:80]}")
+    print(f"   [Elsevier] IdP title: {page.title()[:60]}")
+
+    # State A: HUJI already pre-selected — just click the button.
+    # Try get_by_role first (catches <button>, <a>, and <div role="button/link">).
+    for phrase in ["Access through your organization", "Access through your institution"]:
+        for role in ["button", "link"]:
+            try:
+                loc = page.get_by_role(role, name=phrase, exact=False)
+                if loc.count() > 0:
+                    loc.first.click(timeout=5000)
+                    print(f"   [Elsevier] State A: clicked {role!r} '{phrase}'")
+                    return True
+            except Exception as e:
+                print(f"   [Elsevier] State A get_by_role({role!r}, {phrase!r}) failed: {e}")
+
+    # CSS-selector fallback (handles non-semantic elements)
+    for sel in [
+        "button:has-text('Access through your organization')",
+        "a:has-text('Access through your organization')",
+        "[role='button']:has-text('Access through your organization')",
+        "[role='link']:has-text('Access through your organization')",
+        "button:has-text('Access through your institution')",
+        "a:has-text('Access through your institution')",
+    ]:
+        try:
+            if page.locator(sel).count() > 0:
+                page.click(sel, timeout=5000)
+                print(f"   [Elsevier] State A (CSS): clicked {sel!r}")
+                return True
+        except Exception as e:
+            print(f"   [Elsevier] State A CSS click failed ({sel}): {e}")
+
+    # State B: "Find your organization" search form
+    print("   [Elsevier] State A button not found — trying State B (org search form)")
+    try:
+        page.wait_for_selector('input[type="text"]', state="visible", timeout=8000)
+    except Exception:
+        print("   [Elsevier] No text input appeared — State B unavailable")
+        return False
+
+    try:
+        inp = page.locator('input[type="text"]').first
+        if not inp.is_visible():
+            print("   [Elsevier] input[type=text] not visible")
+            return False
+        inp.click(timeout=3000)
+        inp.fill("")
+        inp.type("Hebrew University", delay=40)
+        print("   [Elsevier] State B: typed 'Hebrew University'")
+    except Exception as e:
+        print(f"   [Elsevier] State B typing failed: {e}")
+        return False
+
+    # Wait for autocomplete dropdown
+    try:
+        page.wait_for_selector(", ".join(_HUJI_RESULT_SELS), timeout=6000)
+    except Exception:
+        time.sleep(2)
+
+    for sel in _HUJI_RESULT_SELS:
+        try:
+            if page.locator(sel).count() > 0:
+                page.locator(sel).first.click(timeout=3000)
+                print(f"   [Elsevier] State B: selected HUJI via {sel!r}")
+                return True
+        except Exception:
+            continue
+
+    print("   [Elsevier] State B: HUJI not found in autocomplete results")
+    return False
+
+
+def authenticate_elsevier(page: Page, article_url: str, email: str, password: str,
+                           captured: list, output_dir: str | None = None) -> None:
+    """Clean Elsevier/ScienceDirect auth flow.
+
+    Flow:
+      1. Fast-path: PDF button already visible (cached session) → click it
+      2. Navigate to institution login URL → id.elsevier.com
+      3. Handle IdP page (State A: pre-selected HUJI button, State B: search form)
+      4. HUJI login (Keycloak or CC IdP)
+      5. Return to article → click PDF button
+    """
+    print(f"\n[Elsevier] Auth: {article_url[:80]}")
+
+    if captured:
+        print("   [Elsevier] PDF already captured — skipping auth")
         return
 
-    # Navigate to the article page only if not already there.
-    # download.py already navigated once; a duplicate goto on the same URL can
-    # trigger a second Cloudflare JS challenge round-trip that exceeds the 30 s
-    # timeout.  If we're already on sciencedirect.com, skip the goto entirely.
-    current_url = page.url
-    already_on_article = (
-        "sciencedirect.com" in current_url or
-        "elsevier.com" in current_url
-    )
-    if not already_on_article:
+    # ── 1. Ensure we're on an Elsevier page ─────────────────────────────────
+    # download.py already navigated to article_url. If that redirected to
+    # id.elsevier.com, page.url contains "elsevier.com" — skip re-navigation.
+    if "elsevier.com" not in page.url and "sciencedirect.com" not in page.url:
+        print(f"   [Elsevier] Not on Elsevier — navigating to article...")
         try:
             page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
-        except Exception as _nav_e:
-            print(f"   [Elsevier] Navigation error (continuing): {_nav_e}")
+        except Exception as e:
+            print(f"   [Elsevier] Nav error: {e}")
     try:
         page.wait_for_load_state("networkidle", timeout=8000)
     except Exception:
@@ -146,550 +398,107 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
     if detect_cloudflare_challenge(page):
         emit_cloudflare_alert(page)
         wait_for_cf_clear(page)
-
-    # If the Chrome extension already captured the PDF (cached session), skip auth entirely
     if captured:
-        print("   [Elsevier] PDF captured during navigation — skipping auth")
+        return
+    dismiss_cookies(page)
+    print(f"   [Elsevier] Landed: {page.url[:80]}")
+
+    # ── 2. Fast-path: PDF already accessible (valid session cookies) ─────────
+    sel = _pdf_button(page)
+    if sel:
+        print(f"   [Elsevier] PDF button visible ({sel}) — clicking directly")
+        _click_pdf_and_wait(page, captured, output_dir)
         return
 
-    dismiss_cookies(page)
-    time.sleep(1)
-
-    current = page.url
-    print(f"   [Elsevier] Landed on: {current[:80]}")
-
-    # Screenshot immediately after initial load so we can see what the page shows
-    import datetime as _dt0
+    # ── 3. Navigate to institution login URL → lands on id.elsevier.com ──────
+    shib_url = _build_sd_institution_login(article_url)
+    print(f"   [Elsevier] No PDF button — navigating to institution login...")
+    print(f"   [Elsevier] URL: {shib_url[:120]}")
     try:
-        _ts0 = _dt0.datetime.now().strftime("%H%M%S")
-        page.screenshot(path=f"debug_elsevier_landed_{_ts0}.png")
-        print(f"   [Elsevier] Landing screenshot: debug_elsevier_landed_{_ts0}.png")
-    except Exception:
-        pass
-
-    # ── Fast-path: check whether the PDF link is already accessible ───────────
-    # If valid session cookies are present from a previous auth, the article page
-    # loads with the institutional PDF download link already visible.  In that
-    # case skip the entire auth flow (all three strategies + HUJI login) and jump
-    # straight to the PDF download section below.  This avoids wasting 3-4 minutes
-    # on selector timeouts that will never match.
-    _pdf_accessible = False
+        page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
+    except Exception as e:
+        print(f"   [Elsevier] Institution login nav error: {e}")
     try:
-        _pdf_accessible = bool(page.evaluate("""() =>
-            !!document.querySelector(
-                'a[href*="showPdf"], a[href*="pdfft"], a[href*="/doi/pdf"], '
-                + 'a[href$=".pdf"]'
-            )
-        """))
-        if _pdf_accessible:
-            print("   [Elsevier] PDF link visible — session cookies valid, skipping auth flow")
-    except Exception as _e:
-        print(f"   [Elsevier] Fast-path check error: {_e}")
-
-    # ── Strategy 1: click "Access through Hebrew University" if visible ────────
-    # ScienceDirect article pages (e.g. /science/article/pii/...) show an
-    # "Access through Hebrew University of Jeru..." button when the institution
-    # is recognized.  This is the fastest auth path — click it first.
-    if not _pdf_accessible and not any(d in page.url for d in _AUTH_DOMAINS):
-        dismiss_cookies(page)
-        time.sleep(1)
-        dismiss_cookies(page)  # ScienceDirect often re-shows after JS loads
-        time.sleep(0.5)
-
-        for sel in [
-            # Institutional access — MUST come before generic "Sign in"
-            "a:has-text('Access through Hebrew University')",
-            "button:has-text('Access through Hebrew University')",
-            "a:has-text('Access through your institution')",
-            "button:has-text('Access through your institution')",
-            "a:has-text('Access through')",
-            "button:has-text('Access through')",
-            # Direct Shibboleth/HUJI links
-            "a[href*='ShibAuth']",
-            "a[href*='entityID=https%3A%2F%2Fidp.huji.ac.il']",
-            "a[href*='entityID=https%3A%2F%2Fidp.cc.huji.ac.il']",
-        ]:
-            try:
-                page.click(sel, timeout=3000)
-                print(f"   [Elsevier] Clicked institutional access: {sel}")
-                time.sleep(3)
-                break
-            except Exception:
-                continue
-
-    # ── Strategy 2: navigate to /fulltext (triggers auth redirect) ─────────────
-    # On Elsevier journal platforms (ajog.org, thelancet.com), navigating
-    # to /fulltext when unauthenticated triggers an auth redirect to
-    # id.elsevier.com.  Works for /abstract URLs and also /science/article/pii.
-    if not _pdf_accessible and not any(d in page.url for d in _AUTH_DOMAINS):
-        fulltext_url = None
-        if "/abstract" in current:
-            fulltext_url = current.replace("/abstract", "/fulltext")
-        elif "/science/article/pii/" in current:
-            # ScienceDirect: append /fulltext to the pii URL
-            fulltext_url = current.rstrip("/") + "?ref=pdf"
-        if fulltext_url:
-            print(f"   [Elsevier] Navigating to fulltext: {fulltext_url[:80]}")
-            try:
-                page.goto(fulltext_url, wait_until="domcontentloaded", timeout=15_000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    pass
-                time.sleep(2)
-                if detect_cloudflare_challenge(page):
-                    emit_cloudflare_alert(page)
-                    wait_for_cf_clear(page)
-                print(f"   [Elsevier] After fulltext nav: {page.url[:80]}")
-            except Exception as e:
-                print(f"   [Elsevier] Fulltext nav error (may be redirect): {e}")
-
-    # ── Strategy 3: click sign-in / access buttons (last resort) ───────────────
-    if not _pdf_accessible and not any(d in page.url for d in _AUTH_DOMAINS):
-        import datetime as _dt
-        _ts = _dt.datetime.now().strftime("%H%M%S")
-        try:
-            page.screenshot(path=f"debug_elsevier_{_ts}.png")
-            print(f"   [Elsevier] Screenshot: debug_elsevier_{_ts}.png  (url={page.url[:80]})")
-        except Exception:
-            pass
-
-        dismiss_cookies(page)
-        time.sleep(0.5)
-
-        # Wait for any access button to appear
-        try:
-            page.wait_for_selector(
-                "button:has-text('Access'), a:has-text('Access'), "
-                "button:has-text('Sign'), a:has-text('Sign'), "
-                "button:has-text('Get access'), a:has-text('Get access')",
-                timeout=6000,
-            )
-        except Exception:
-            pass
-
-        dismiss_cookies(page)
-        time.sleep(0.5)
-
-        for sel in [
-            # Institutional access first (most reliable)
-            "a:has-text('Log in via your institution')",
-            "a:has-text('Institutional access')",
-            "button:has-text('Get access')",
-            "a:has-text('Get access')",
-            "#access-options",
-            "button.buybox__btn",
-            # Generic sign-in (last resort — may go to Elsevier login)
-            "button:has-text('Sign in')",
-            "a:has-text('Sign in')",
-            "[data-aa-button='signIn']",
-            "a:has-text('Log in')",
-            "button:has-text('Log in')",
-        ]:
-            try:
-                page.click(sel, timeout=4000)
-                print(f"   [Elsevier] Clicked: {sel}")
-                time.sleep(2)
-                break
-            except Exception:
-                continue
-
-        # After clicking, look for institution link in any panel that opened
-        if not any(d in page.url for d in _AUTH_DOMAINS):
-            for sel in [
-                "a:has-text('Access through Hebrew University')",
-                "button:has-text('Access through Hebrew University')",
-                "a:has-text('Access through your institution')",
-                "button:has-text('Access through your institution')",
-                "a:has-text('Access through')",
-                "button:has-text('Access through')",
-                "a:has-text('Log in via your institution')",
-                "a:has-text('institution')",
-                "a[href*='openathens']",
-                "a[href*='shibboleth']",
-                "a[href*='id.elsevier.com']",
-            ]:
-                try:
-                    page.click(sel, timeout=4000)
-                    print(f"   [Elsevier] Clicked institution link: {sel}")
-                    time.sleep(3)
-                    break
-                except Exception:
-                    continue
-
-    if not _pdf_accessible:
-        try:
-            print(f"   [Elsevier] URL after click attempts: {page.url[:80]}")
-        except Exception:
-            print("   [Elsevier] Browser closed before auth could complete")
-            return
-
-        # ── Wait for auth/IdP page ─────────────────────────────────────────────
-        try:
-            page.wait_for_function(
-                """() => {
-                    const u = window.location.href;
-                    return u.includes('id.elsevier.com') ||
-                           u.includes('sciencedirect.com/user/ropc') ||
-                           u.includes('wayfinder') ||
-                           u.includes('openathens') ||
-                           u.includes('huji.ac.il');
-                }""",
-                timeout=30_000,
-            )
-            current = page.url
-            print(f"   [Elsevier] Auth page: {current[:80]}")
-
-            if 'id.elsevier.com' in current or 'sciencedirect.com/user/ropc' in current:
-                # Elsevier's own IdP — click "Continue with your institution" then search
-                dismiss_cookies(page)
-                for sel in [
-                    "button:has-text('Continue with your institution')",
-                    "a:has-text('Continue with your institution')",
-                    "button:has-text('Access through your institution')",
-                    "a:has-text('your institution')",
-                    "button:has-text('your institution')",
-                    "a[href*='institution']",
-                ]:
-                    try:
-                        page.click(sel, timeout=4000)
-                        print(f"   [Elsevier] Clicked IdP institution btn: {sel}")
-                        time.sleep(3)
-                        break
-                    except Exception:
-                        continue
-                _select_huji(page)
-                time.sleep(3)
-                # If still on id.elsevier.com (HUJI not found in search results),
-                # bypass the wayfinder entirely and navigate directly to the Shibboleth URL.
-                if 'id.elsevier.com' in page.url or 'openathens' in page.url:
-                    print("   [Elsevier] Institution select failed — using direct Shibboleth URL...")
-                    shib_url = _build_sd_institution_login(article_url)
-                    try:
-                        page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=8000)
-                        except Exception:
-                            pass
-                        time.sleep(2)
-                        if detect_cloudflare_challenge(page):
-                            emit_cloudflare_alert(page)
-                            wait_for_cf_clear(page)
-                    except Exception as _e:
-                        print(f"   [Elsevier] Shibboleth redirect error: {_e}")
-            elif 'wayfinder' in current or 'openathens' in current:
-                _select_huji(page)
-
-        except Exception as e:
-            print(f"   [Elsevier] Auth wait: {e}")
-
-        wait_for_huji_and_login(page, email, password)
-
-        print("\n[Elsevier] Waiting to return to journal...")
-        try:
-            page.wait_for_function(
-                """() => {
-                    const u = window.location.href;
-                    return !u.includes('huji.ac.il') &&
-                           !u.includes('openathens') &&
-                           !u.includes('id.elsevier.com') &&
-                           !u.includes('login');
-                }""",
-                timeout=90_000,
-            )
-            print(f"   Back: {page.url[:80]}")
-        except Exception:
-            print(f"   Timeout. URL: {page.url}")
-
-        # After HUJI login, ScienceDirect may kick off a second OAuth2 round-trip
-        # through id.elsevier.com before the final article page is ready.
-        # Wait for ALL navigation to settle before touching the page.
-        try:
-            page.wait_for_load_state("networkidle", timeout=20_000)
-        except Exception:
-            pass
-        time.sleep(2)
-        if detect_cloudflare_challenge(page):
-            emit_cloudflare_alert(page)
-            wait_for_cf_clear(page)
-
-        # Navigate to article — guard against being interrupted by OAuth callback
-        try:
-            page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
-            try:
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"   [Elsevier] Post-auth nav interrupted (OAuth in progress): {e}")
-            # Just wait for whatever navigation is in flight to finish
-            try:
-                page.wait_for_load_state("networkidle", timeout=30_000)
-            except Exception:
-                pass
-
-        time.sleep(2)
-
-        # Reload the article page so the pdfft token is freshly minted for the
-        # fully-established authenticated session (the post-OAuth state may not
-        # yet have had a chance to write its own session cookies before page.goto).
-        print("   Reloading to get fresh authenticated page...")
-        try:
-            page.reload(wait_until="domcontentloaded")
-            try:
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                pass
-            time.sleep(2)
-        except Exception as e:
-            print(f"   [Elsevier] Reload error: {e}")
-
-        # Check whether the PDF link is now accessible.  If the HUJI SSO completed
-        # via a cached Elsevier session (no visit to huji.ac.il), the article page
-        # may load without institutional access.  In that case force a fresh
-        # Shibboleth-based login which bypasses all cached Elsevier sessions.
-        _pdf_after_auth = False
-        try:
-            _pdf_after_auth = bool(page.evaluate("""() =>
-                !!document.querySelector(
-                    'a[href*="showPdf"], a[href*="pdfft"], a[href*="/doi/pdf"]'
-                )
-            """))
-        except Exception:
-            pass
-
-        if not _pdf_after_auth and not captured:
-            print("   [Elsevier] PDF link absent after auth — forcing fresh Shibboleth login...")
-            shib_url = _build_sd_institution_login(article_url)
-            try:
-                page.goto(shib_url, wait_until="domcontentloaded", timeout=30_000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    pass
-                time.sleep(2)
-                if detect_cloudflare_challenge(page):
-                    emit_cloudflare_alert(page)
-                    wait_for_cf_clear(page)
-                wait_for_huji_and_login(page, email, password)
-                try:
-                    page.wait_for_function(
-                        """() => {
-                            const u = window.location.href;
-                            return !u.includes('huji.ac.il') &&
-                                   !u.includes('shibboleth') &&
-                                   !u.includes('login');
-                        }""",
-                        timeout=90_000,
-                    )
-                except Exception:
-                    pass
-                try:
-                    page.wait_for_load_state("networkidle", timeout=20_000)
-                except Exception:
-                    pass
-                time.sleep(2)
-                page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    pass
-                time.sleep(2)
-                page.reload(wait_until="domcontentloaded")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    pass
-                time.sleep(2)
-            except Exception as _e:
-                print(f"   [Elsevier] Re-auth error: {_e}")
-
-    print(f"   Authenticated page: {page.title()[:80]}")
-
-    from journal_club.pdf_capture import wait_for_pdf
-
-    # ── PDF download ───────────────────────────────────────────────────────────
-    # IMPORTANT: Do NOT open the PDF URL in a blank new tab via context.new_page()
-    # + goto().  ScienceDirect's Cloudflare protection checks Referer, opener,
-    # and sec-fetch-* headers.  A blank tab has none of these, causing Cloudflare
-    # to redirect back to the article page without serving the PDF.
-    #
-    # Instead, click the PDF link element on the authenticated page.  This
-    # preserves all headers and triggers a natural browser navigation.  If the
-    # link opens a new tab (target="_blank"), pdf_capture's context.on("page")
-    # handler auto-registers response/download hooks on it.
-
-    print("\n[Elsevier] Downloading PDF from authenticated page...")
-
-    import os as _os, tempfile as _tmp, json as _json
-    from playwright.sync_api import TimeoutError as _PlaywrightTimeout
-
-    # Give JavaScript time to render the PDF download button (AJOG / Elsevier pages
-    # are heavily JS-driven and may not show the button until hydration completes).
-    try:
-        page.wait_for_load_state("networkidle", timeout=10_000)
+        page.wait_for_load_state("networkidle", timeout=8000)
     except Exception:
         pass
     time.sleep(2)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
+    if captured:
+        return
+    dismiss_cookies(page)
 
-    # ── Strategy 1: Navigate to PDF URL via window.open ────────────────────────
-    # Atypon/AJOG's "Download PDF" href (e.g. /action/showPdf?pii=...) is an
-    # HTML page that uses JavaScript to redirect to the actual PDF URL.  If we
-    # let Chrome handle this as a CDP file-download (via expect_download), it
-    # saves the HTML page before JS can run, producing a non-PDF file.
-    #
-    # window.open() from the authenticated article page:
-    #   • sets the opener + Referer so Cloudflare / anti-hotlink checks pass
-    #   • runs JavaScript, so showPdf → pdfft redirect chains work
-    #   • the pdf_capture response hook (registered via context.on("page"))
-    #     captures the final PDF response, or the download hook saves it
-    pdf_href = None
+    # ── 4. Handle id.elsevier.com IdP page ──────────────────────────────────
+    idp_ok = _handle_elsevier_idp(page)
+    if not idp_ok:
+        # Neither button nor form found — log diagnostic and continue anyway
+        print(f"   [Elsevier] IdP handling failed — URL: {page.url[:80]}")
+        try:
+            page.screenshot(path="debug_elsevier_idp_fail.png")
+            print("   [Elsevier] Screenshot: debug_elsevier_idp_fail.png")
+        except Exception:
+            pass
+
+    # ── 5. HUJI login ────────────────────────────────────────────────────────
+    # wait_for_huji_and_login waits up to 60s for huji.ac.il to appear,
+    # then fills email+password and submits. Handles both CC IdP and Keycloak.
+    wait_for_huji_and_login(page, email, password)
+
+    # ── 6. Wait for return from HUJI / OAuth callback ────────────────────────
+    print("   [Elsevier] Waiting to return from HUJI...")
     try:
-        pdf_href = page.evaluate("""() => {
-            const links = Array.from(document.querySelectorAll('a[href]'));
+        page.wait_for_function(
+            """() => {
+                const u = window.location.href;
+                return !u.includes('huji.ac.il') &&
+                       !u.includes('id.elsevier.com') &&
+                       !u.includes('openathens') &&
+                       !u.includes('login');
+            }""",
+            timeout=90_000,
+        )
+        print(f"   [Elsevier] Returned: {page.url[:80]}")
+    except Exception:
+        print(f"   [Elsevier] Return wait timed out. URL: {page.url[:80]}")
 
-            // Strategy 1: Prefer Elsevier/ScienceDirect domain links (article's own PDF)
-            // These use showPdf, pdfft, /action/download, etc.
-            const elsevier_pdf = links.find(a => {
-                const h = (a.href || '').toLowerCase();
-                const is_elsevier = h.includes('sciencedirect.com') ||
-                                  h.includes('showpdf') ||
-                                  h.includes('pdfft') ||
-                                  h.includes('/action/download') ||
-                                  h.includes('pdf.sciencedirectassets.com');
-                const is_pdf = h.includes('pdf') || h.endsWith('.pdf');
-                return is_elsevier && is_pdf;
-            });
-            if (elsevier_pdf) {
-                console.log('[PDF] Found Elsevier domain PDF: ' + elsevier_pdf.href);
-                return elsevier_pdf.href;
-            }
+    # Let any OAuth round-trip through id.elsevier.com finish
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except Exception:
+        pass
+    time.sleep(2)
+    if detect_cloudflare_challenge(page):
+        emit_cloudflare_alert(page)
+        wait_for_cf_clear(page)
 
-            // Strategy 2: Prefer links with PDF text that are Elsevier endpoints
-            const text_pdf = links.find(a => {
-                const t = (a.innerText || a.textContent || '').toLowerCase();
-                const h = (a.href || '').toLowerCase();
-                const has_pdf_text = t.includes('pdf') || t.includes('download');
-                const is_elsevier_endpoint = h.includes('showpdf') ||
-                                           h.includes('pdfft') ||
-                                           h.includes('sciencedirect') ||
-                                           h.includes('/doi/pdf');
-                return has_pdf_text && is_elsevier_endpoint;
-            });
-            if (text_pdf) {
-                console.log('[PDF] Found PDF via text + Elsevier endpoint: ' + text_pdf.href);
-                return text_pdf.href;
-            }
-
-            // Strategy 3: ANY PDF link on Elsevier domain (fallback)
-            const any_elsevier = links.find(a => {
-                const h = (a.href || '').toLowerCase();
-                return (h.includes('sciencedirect.com') || h.includes('showpdf') ||
-                       h.includes('pdfft') || h.includes('pdf.sciencedirectassets')) &&
-                       (h.includes('pdf') || h.endsWith('.pdf'));
-            });
-            if (any_elsevier) {
-                console.log('[PDF] Found any Elsevier PDF: ' + any_elsevier.href);
-                return any_elsevier.href;
-            }
-
-            // Strategy 4: LAST RESORT - any PDF link (including external citations)
-            const any_pdf = links.find(a => {
-                const h = (a.href || '').toLowerCase();
-                return h.includes('pdf') || h.endsWith('.pdf');
-            });
-            if (any_pdf) {
-                console.log('[PDF] WARNING: Falling back to external PDF: ' + any_pdf.href);
-                return any_pdf.href;
-            }
-
-            console.log('[PDF] No PDF link found');
-            return null;
-        }""")
+    # ── 7. Navigate to article and click PDF ─────────────────────────────────
+    try:
+        page.goto(article_url, wait_until="domcontentloaded", timeout=30_000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
     except Exception as e:
-        print(f"   [Elsevier] DOM eval error: {e}")
+        print(f"   [Elsevier] Post-auth article nav: {e}")
+        try:
+            page.wait_for_load_state("networkidle", timeout=30_000)
+        except Exception:
+            pass
+    time.sleep(2)
 
-    if pdf_href:
-        print(f"   [Elsevier] PDF href: {pdf_href[:80]}")
+    # Reload so the authenticated session's pdfft token is freshly issued
+    try:
+        page.reload(wait_until="domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        time.sleep(2)
+    except Exception as e:
+        print(f"   [Elsevier] Reload error: {e}")
 
-        # ── Strategy A: click the actual link element on the page ─────────────
-        # A real DOM click is a genuine user gesture — it bypasses Chrome's popup
-        # blocker entirely and preserves the opener + Referer context that Elsevier
-        # requires.  The route interceptor for **/showPdf** (registered in
-        # pdf_capture.attach_pdf_hooks) captures the PDF bytes before Chrome's
-        # viewer can consume them, so we never need to read the response via CDP.
-        pdf_link_clicked = False
-        for sel in [
-            "a[href*='showPdf']",
-            "a[href*='pdfft']",
-            "a:has-text('Download PDF')",
-            "button:has-text('Download PDF')",
-            "a:has-text('PDF')",
-            "button:has-text('PDF')",
-        ]:
-            try:
-                page.click(sel, timeout=5000)
-                print(f"   [Elsevier] Clicked PDF link: {sel}")
-                pdf_link_clicked = True
-                break
-            except Exception:
-                continue
-
-        if not pdf_link_clicked:
-            # ── Strategy B: window.open() — route interceptor still handles it ──
-            # Use expect_popup() so we know whether Chrome actually opened the tab.
-            from playwright.sync_api import TimeoutError as _PwTimeout
-            try:
-                with page.expect_popup(timeout=10_000) as _popup_info:
-                    page.evaluate(f"window.open({_json.dumps(pdf_href)}, '_blank')")
-                print("   [Elsevier] Popup opened via window.open")
-            except _PwTimeout:
-                print("   [Elsevier] window.open blocked/timed-out — route interceptor may still capture")
-
-        if not captured:
-            # First check immediately (after a brief settle) for any reader/PDF tabs
-            # that opened when the link was clicked — don't wait 120s before looking.
-            time.sleep(6)
-            if not captured:
-                _check_reader_tabs(page, captured)
-            if not captured:
-                wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
-            if not captured:
-                _check_reader_tabs(page, captured)
-                wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
-    else:
-        # ── Strategy 2: no href found — try clicking PDF buttons ───────────────
-        # Used for ScienceDirect articles where the PDF button may be a <button>
-        # that opens a reader tab rather than triggering a direct download.
-        # Do NOT use expect_download() — clicking "View PDF" opens reader.elsevier.com
-        # (an HTML reader, not a PDF download), causing a 30s timeout with no event.
-        print("   [Elsevier] No PDF href in DOM — trying button clicks...")
-
-        _pdf_link_sels = [
-            "a[href*='pdfft']",
-            "a:has-text('View PDF')",
-            "button:has-text('View PDF')",
-            "a:has-text('Download PDF')",
-            "button:has-text('Download PDF')",
-            "a[href*='/pdf/']",
-        ]
-
-        clicked = False
-        for sel in _pdf_link_sels:
-            try:
-                page.click(sel, timeout=5000)
-                print(f"   [Elsevier] Clicked: {sel}")
-                clicked = True
-                break
-            except Exception:
-                continue
-
-        if clicked and not captured:
-            # Give the click a moment to open a tab or trigger a response
-            time.sleep(6)
-            _check_reader_tabs(page, captured)
-            if not captured:
-                wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
-            if not captured:
-                _check_reader_tabs(page, captured)
-                wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+    print(f"   [Elsevier] Post-auth page: {page.title()[:60]}")
+    if not _click_pdf_and_wait(page, captured, output_dir):
+        print(f"   [Elsevier] No PDF captured — final URL: {page.url[:80]}")

@@ -32,6 +32,9 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
   const [cloudflareAlert, setCloudflareAlert] = useState<{ queueItemId: string; message: string } | null>(null);
   const busyRef = useRef(false);
   const unlistenersRef = useRef<UnlistenFn[]>([]);
+  // Items that failed in this session — never re-claim them even if the
+  // backend re-queues them (overrides MAX_RETRIES > 0). Cleared on app restart.
+  const failedThisSessionRef = useRef<Set<string>>(new Set());
 
   // Send heartbeat on mount + every 30s
   useEffect(() => {
@@ -92,6 +95,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
             );
           }
           if (parsed.type === "error") {
+            failedThisSessionRef.current.add(item.id);
             setActiveDownloads(prev =>
               prev.map(d =>
                 d.queueItemId === item.id
@@ -115,6 +119,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
       });
       const ul3 = await listen<string>(`download-error-${item.id}`, ev => {
         console.error("[sidecar error]", ev.payload);
+        failedThisSessionRef.current.add(item.id);
         setActiveDownloads(prev =>
           prev.map(d => d.queueItemId === item.id ? { ...d, status: "error", errorMsg: ev.payload } : d)
         );
@@ -138,6 +143,7 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
           },
         });
       } catch (e) {
+        failedThisSessionRef.current.add(item.id);
         setActiveDownloads(prev =>
           prev.map(d =>
             d.queueItemId === item.id
@@ -167,14 +173,18 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
       setFailedItems(failed);
     } catch {}
 
-    setQueuedItems(queued);
+    // Skip items that already failed in this session — prevents auto-retry
+    // even if the backend re-queued the item (e.g., MAX_RETRIES > 0 not yet
+    // reloaded). User can still manually retry via the failed-items panel.
+    const eligible = queued.filter(q => !failedThisSessionRef.current.has(q.id));
+    setQueuedItems(eligible);
 
-    if (queued.length === 0) return;
+    if (eligible.length === 0) return;
 
     busyRef.current = true;
     try {
       // Process one at a time — claim then spawn sidecar
-      const item = queued[0];
+      const item = eligible[0];
       const deviceId = getStoredUserId() ?? "unknown";
       try {
         await api.claimQueueItem(item.id, deviceId);
@@ -220,6 +230,8 @@ export function useQueuePoller({ creds, enabled, onArticleReady }: Options) {
   );
 
   const retry = useCallback(async (itemId: string) => {
+    // User explicitly asked to retry — remove from session-fail blocklist
+    failedThisSessionRef.current.delete(itemId);
     await api.retryQueueItem(itemId);
     setFailedItems(prev => prev.filter(i => i.id !== itemId));
     setTimeout(pollOnce, 500);

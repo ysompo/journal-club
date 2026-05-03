@@ -52,6 +52,15 @@ _CLONE_IGNORE = {
     "Crashpad", "BrowserMetrics", "Storage",
     "Sessions",
     "Current Tabs", "Current Session", "Last Tabs", "Last Session",
+    # Extensions hijack PDF downloads (Adobe Acrobat etc) — never clone them
+    "Extensions", "Extension Rules", "Extension Scripts", "Extension State",
+    "Local Extension Settings", "Managed Extension Settings",
+    "Sync Extension Settings",
+    # Sync-related state — Chrome can re-install extensions from these via the
+    # signed-in account. Strip them so the JC profile is sync-isolated.
+    "Sync Data", "Sync Data Backup",
+    "Web Data", "Web Data-journal",
+    "Account Tracker Service", "AccountConsistencyService",
 }
 
 
@@ -363,6 +372,16 @@ def _spawn_chrome_with_cdp(chrome_path: str, profile_dir: str, port: int,
         "--disable-popup-blocking",
         "--disable-translate",
         "--restore-last-session=false",
+        # Disable all extensions — third-party extensions (Adobe Acrobat,
+        # Endnote Click, Kopernio, ad blockers) intercept PDF downloads
+        # and replace the page with their own UI, breaking the flow.
+        "--disable-extensions",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-extensions-http-throttling",
+        # Block any extension install attempts (Web Store, sync, enterprise)
+        "--disable-extensions-except=",
+        "--disable-default-apps",
+        "--disable-sync",
         "about:blank",
     ]
     creationflags = 0
@@ -467,6 +486,7 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                 context: BrowserContext = contexts[0] if contexts else browser.new_context()
                 pages = context.pages
                 page: Page = pages[0] if pages else context.new_page()
+
                 if start_url != "about:blank" and page.url in ("about:blank", "chrome://newtab/", ""):
                     page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 logger.info("[Browser] ✓ CDP attached")
@@ -527,14 +547,18 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
     finally:
         if chrome_proc is not None:
             try:
-                chrome_proc.terminate()
-                try:
-                    chrome_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    chrome_proc.kill()
+                # taskkill /F /T kills the full process tree (renderer, GPU, utility).
+                # terminate() only sends SIGTERM to the parent and orphans children on Windows.
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(chrome_proc.pid)],
+                    capture_output=True, timeout=10,
+                )
             except Exception:
-                pass
-            # Clean up any remaining chrome.exe children using this profile.
+                try:
+                    chrome_proc.kill()
+                except Exception:
+                    pass
+            # Belt-and-suspenders: kill any chrome.exe still referencing this profile.
             try:
                 _kill_chrome_with_profile(active_profile)
             except Exception:

@@ -65,7 +65,18 @@ def detect_cloudflare_challenge(page: Page) -> bool:
         title = (page.title() or "").lower()
     except Exception:
         title = ""
-    if "just a moment" in title or "cloudflare" in title:
+    # CF (and CF-fronted services like sciencedirectassets.com) use multiple
+    # challenge page titles. Match all known variants.
+    challenge_title_markers = (
+        "just a moment",
+        "cloudflare",
+        "security verification",        # sciencedirectassets.com
+        "verify you are human",
+        "verifying you are human",
+        "checking your browser",
+        "attention required",
+    )
+    if any(m in title for m in challenge_title_markers):
         return True
     try:
         if page.locator("input[name='cf-turnstile-response']").count() > 0:
@@ -77,7 +88,60 @@ def detect_cloudflare_challenge(page: Page) -> bool:
             return True
     except Exception:
         pass
+    # Body-text fallback for CF challenge pages without classic markers
+    try:
+        if page.locator("text=Verify you are human").count() > 0:
+            return True
+        if page.locator("text=Verifying you are human").count() > 0:
+            return True
+    except Exception:
+        pass
     return False
+
+
+def detect_elsevier_verification(page: Page) -> bool:
+    """Detect Elsevier's 'Request Verification: In Progress' bot-block page."""
+    try:
+        title = (page.title() or "").lower()
+        if "verification" in title or "request verification" in title:
+            return True
+    except Exception:
+        pass
+    try:
+        # Look for the heading or body text that identifies the page
+        if page.locator("h1:has-text('Request Verification')").count() > 0:
+            return True
+        if page.locator("text=Request Verification: In Progress").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def detect_elsevier_hardblock(page: Page) -> bool:
+    """Detect Elsevier's hard-block error page ('There was a problem providing
+    the content you requested'). This page has NO interactive challenge — it's
+    served when the WAF has flagged the session/IP. No amount of waiting or
+    clicking will bypass it from the same session.
+    """
+    try:
+        if page.locator("h1:has-text('There was a problem providing the content')").count() > 0:
+            return True
+        if page.locator("text=There was a problem providing the content you requested").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def detect_elsevier_hardblock_html(html_bytes: bytes) -> bool:
+    """Same as detect_elsevier_hardblock but works on raw response bytes.
+    Used when we have an APIRequest response body without a live Page object."""
+    try:
+        text = html_bytes.decode("utf-8", errors="ignore")
+        return "There was a problem providing the content you requested" in text
+    except Exception:
+        return False
 
 
 def wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
@@ -90,6 +154,18 @@ def wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
         return True
     except Exception:
         return False
+
+
+def wait_for_pdf_or_user_action(captured: list, timeout_s: int = 180) -> bool:
+    """Poll until PDF is captured or timeout. Used when waiting for user to
+    complete verification in Chrome. Keeps the browser session alive."""
+    import time
+    start = time.time()
+    while time.time() - start < timeout_s:
+        if captured:
+            return True
+        time.sleep(2)
+    return bool(captured)
 
 
 def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list) -> bool:

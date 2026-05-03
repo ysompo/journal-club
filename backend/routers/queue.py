@@ -9,7 +9,7 @@ from routers.users import get_current_user
 router = APIRouter(prefix="/queue", tags=["queue"])
 
 CLAIM_TIMEOUT_SECONDS = 300  # 5 min — auto-release stale claims
-MAX_RETRIES = 1
+MAX_RETRIES = 0  # No auto-retry — failed downloads stay failed for debugging
 
 
 class QueueRequest(BaseModel):

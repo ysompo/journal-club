@@ -110,15 +110,10 @@ def download_article(input_str: str, cfg: Config, abort_check=None) -> tuple[Art
 
     captured = []
 
-    # ── 2. Browser session (up to 2 attempts) ────────────────────────────────
-    for attempt in range(1, 3):
+    # ── 2. Browser session (single attempt) ──────────────────────────────────
+    for attempt in range(1, 2):
         if abort_check and abort_check():
             raise DownloadCancelledError("Download cancelled by user")
-
-        if attempt > 1:
-            print(f"\n[Retry] Attempt {attempt} — PDF not captured, retrying browser session...")
-            time.sleep(3)
-            captured = []
 
         with launch_browser(cfg.chrome_profile, cfg.chrome_path) as (_, browser, context, page):
             if abort_check and abort_check():
@@ -178,19 +173,6 @@ def download_article(input_str: str, cfg: Config, abort_check=None) -> tuple[Art
                     raise DownloadCancelledError("Download cancelled by user")
 
                 wait_for_pdf(captured, timeout_s=15, output_dir=cfg.output_dir)
-
-                fallback_url = pdf_url or auth_pdf_url
-                if not captured and fallback_url:
-                    pdf_url = fallback_url
-                if not captured and pdf_url:
-                    print(f"\n[Fallback] Navigating directly to PDF URL after auth...")
-                    print(f"   {pdf_url[:80]}")
-                    try:
-                        pdf_tab = context.new_page()
-                        pdf_tab.goto(pdf_url, wait_until="commit", timeout=20_000)
-                        wait_for_pdf(captured, timeout_s=45, output_dir=cfg.output_dir)
-                    except Exception as e:
-                        print(f"   Fallback error: {e}")
 
             time.sleep(5)  # grace period for in-flight PDF downloads
 
