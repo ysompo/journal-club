@@ -487,59 +487,6 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
                 pages = context.pages
                 page: Page = pages[0] if pages else context.new_page()
 
-                # ── Stealth: hide CDP/automation fingerprints ───────────────
-                # CDP-attached Chrome sets navigator.webdriver=true and exposes
-                # other CDP artifacts that Cloudflare's bot-detection JS probes.
-                # When detected, CF serves a static "There was a problem" hard-
-                # block (no widget). Hiding webdriver downgrades the response to
-                # the interactive Turnstile challenge that the user can solve.
-                try:
-                    context.add_init_script("""
-                        // 1. Hide navigator.webdriver
-                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-                        // 2. Restore navigator.plugins to non-empty
-                        Object.defineProperty(navigator, 'plugins', {
-                            get: () => [
-                                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                                { name: 'Native Client', filename: 'internal-nacl-plugin' },
-                            ],
-                        });
-
-                        // 3. Restore navigator.languages
-                        Object.defineProperty(navigator, 'languages', {
-                            get: () => ['en-US', 'en'],
-                        });
-
-                        // 4. Stub window.chrome.runtime if missing
-                        if (!window.chrome) window.chrome = {};
-                        if (!window.chrome.runtime) {
-                            window.chrome.runtime = { connect: () => {}, sendMessage: () => {} };
-                        }
-
-                        // 5. Mask permissions API for notifications
-                        const origQuery = window.navigator.permissions && window.navigator.permissions.query;
-                        if (origQuery) {
-                            window.navigator.permissions.query = (params) =>
-                                params.name === 'notifications'
-                                    ? Promise.resolve({ state: Notification.permission })
-                                    : origQuery.call(window.navigator.permissions, params);
-                        }
-
-                        // 6. Remove Playwright/CDP property leaks
-                        try { delete window.__playwright; } catch(e) {}
-                        try { delete window.__pw_manualMouseTrigger; } catch(e) {}
-                        for (const key of Object.keys(window)) {
-                            if (key.startsWith('cdc_') || key.startsWith('$cdc_')) {
-                                try { delete window[key]; } catch(e) {}
-                            }
-                        }
-                    """)
-                    logger.info("[Browser] ✓ Stealth init script installed")
-                except Exception as _e:
-                    logger.warning(f"[Browser] add_init_script failed: {_e}")
-
                 if start_url != "about:blank" and page.url in ("about:blank", "chrome://newtab/", ""):
                     page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 logger.info("[Browser] ✓ CDP attached")

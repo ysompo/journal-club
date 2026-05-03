@@ -5,14 +5,9 @@ from playwright.sync_api import Page
 
 from journal_club.auth_oa_check import (
     detect_cloudflare_challenge, detect_elsevier_verification,
-    detect_elsevier_hardblock, detect_elsevier_hardblock_html,
+    detect_elsevier_hardblock,
     emit_cloudflare_alert, wait_for_cf_clear, wait_for_pdf_or_user_action,
 )
-
-
-class ElsevierHardBlockError(RuntimeError):
-    """Raised when Elsevier's WAF hard-blocks the session — no interactive bypass exists."""
-    pass
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 _HUJI_ENTITY_ID = "https://idp.huji.ac.il/idp/shibboleth"
@@ -74,332 +69,39 @@ def _get_pdf_href(page: Page, sel: str) -> str | None:
     return None
 
 
-def _fetch_pdf_via_api_request(page: Page, pdf_href: str, captured: list) -> bool:
-    """Download the PDF via Playwright's APIRequestContext.
-
-    This uses Chrome's actual network stack (correct TLS fingerprint), inherits
-    all session cookies from the BrowserContext automatically, and bypasses any
-    Chrome extensions (Adobe Acrobat etc) — extensions only intercept in-page
-    traffic, not Node-side APIRequestContext requests. We can also set
-    Sec-Fetch-* headers to look like a real document navigation, which matters
-    because Elsevier serves verification HTML to anything tagged as XHR.
-    """
-    print(f"   [Elsevier] APIRequest GET {pdf_href[:80]}")
-    try:
-        article_url = page.url
-        try:
-            ua = page.evaluate("() => navigator.userAgent")
-        except Exception:
-            ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/147.0.0.0 Safari/537.36")
-        resp = page.context.request.get(
-            pdf_href,
-            headers={
-                "Referer": article_url,
-                "User-Agent": ua,
-                "Accept": "application/pdf,application/x-pdf,*/*;q=0.9",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "same-origin",
-                "Sec-Fetch-User": "?1",
-                "Upgrade-Insecure-Requests": "1",
-            },
-            timeout=60_000,
-            max_redirects=10,
-        )
-        body = resp.body()
-        ct = (resp.headers.get("content-type") or "").lower()
-        print(f"   [Elsevier] APIRequest: {resp.status} {ct[:40]} ({len(body):,} bytes)")
-        if body[:4] == b"%PDF" and len(body) > 10_000:
-            print(f"   [Elsevier] ✓ APIRequest PDF: {len(body):,} bytes")
-            captured.append(body)
-            return True
-        print(f"   [Elsevier] APIRequest non-PDF (first 16 bytes: {body[:16]!r})")
-        # Save the response body for diagnostic inspection
-        try:
-            import tempfile, os as _os
-            diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
-            _os.makedirs(diag_dir, exist_ok=True)
-            ext = "html" if "html" in ct else "bin"
-            diag_path = _os.path.join(diag_dir, f"elsevier-block-{int(time.time())}.{ext}")
-            with open(diag_path, "wb") as f:
-                f.write(body)
-            print(f"   [Elsevier] Block response saved for inspection: {diag_path}")
-        except Exception:
-            pass
-        # Detect the hard-block error page so we don't waste time on fallbacks
-        # that cannot succeed against this WAF state.
-        if detect_elsevier_hardblock_html(body):
-            raise ElsevierHardBlockError(
-                "Elsevier WAF hard-block: 'There was a problem providing the content you "
-                "requested'. The session/IP is flagged — no interactive bypass exists. "
-                "Try again later, try a different article, or download manually in your "
-                f"personal Chrome. Diagnostic page: {diag_path}"
-            )
-    except ElsevierHardBlockError:
-        raise
-    except Exception as e:
-        print(f"   [Elsevier] APIRequest error: {type(e).__name__}: {e}")
-    return False
-
-
-def _fetch_pdf_via_urllib(page: Page, pdf_href: str, captured: list) -> bool:
-    """Download the PDF via urllib using cookies extracted from the browser.
-
-    Elsevier's pdfft endpoint hard-blocks any client coming from the SAML/OAuth
-    session inside the browser (HTML returned even for fetch()). urllib has no
-    automation fingerprint, no SAML session signature — just an authenticated
-    HTTP request with cookies copied from the browser context.
-    """
-    import urllib.request
-    import urllib.error
-    import http.cookiejar
-
-    print(f"   [Elsevier] Trying urllib download with browser cookies...")
-    try:
-        # Pull all cookies for sciencedirect.com / elsevier.com from the context
-        jar = http.cookiejar.CookieJar()
-        for c in page.context.cookies():
-            domain = c.get("domain", "")
-            if not any(d in domain for d in ("sciencedirect.com", "elsevier.com")):
-                continue
-            ck = http.cookiejar.Cookie(
-                version=0,
-                name=c["name"],
-                value=c["value"],
-                port=None, port_specified=False,
-                domain=domain, domain_specified=bool(domain),
-                domain_initial_dot=domain.startswith("."),
-                path=c.get("path", "/"), path_specified=True,
-                secure=c.get("secure", False),
-                expires=int(c["expires"]) if c.get("expires", -1) > 0 else None,
-                discard=False, comment=None, comment_url=None, rest={},
-            )
-            jar.set_cookie(ck)
-
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-
-        # Mimic a normal browser request originating from the article page
-        article_url = page.url
-        ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36")
-        headers = {
-            "User-Agent": ua,
-            "Accept": "application/pdf,application/x-pdf,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": article_url,
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1",
-        }
-        req = urllib.request.Request(pdf_href, headers=headers)
-        with opener.open(req, timeout=60) as resp:
-            ct = resp.headers.get("Content-Type", "").lower()
-            data = resp.read()
-            print(f"   [Elsevier] urllib response: {resp.status} {ct[:40]} ({len(data):,} bytes)")
-            if data[:4] == b"%PDF" or "pdf" in ct:
-                if data[:4] == b"%PDF" and len(data) > 10_000:
-                    print(f"   [Elsevier] ✓ urllib PDF: {len(data):,} bytes")
-                    captured.append(data)
-                    return True
-                print(f"   [Elsevier] urllib response not a valid PDF (header: {data[:8]!r})")
-            else:
-                print(f"   [Elsevier] urllib returned non-PDF (likely verification HTML)")
-    except urllib.error.HTTPError as e:
-        print(f"   [Elsevier] urllib HTTP error: {e.code} {e.reason}")
-    except Exception as e:
-        print(f"   [Elsevier] urllib error: {type(e).__name__}: {e}")
-    return False
-
-
-def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
-    """Download PDF via in-page fetch() — bypasses Elsevier bot detection.
-
-    Running fetch() from within the page's JS context means the server sees a
-    normal same-origin XHR with all existing session cookies and the article
-    page as Referer. No CDP navigation fingerprint, no automation signals.
-    """
-    import base64
-    print(f"   [Elsevier] Trying in-page fetch() for PDF...")
-    # Bump default timeout for this single long-running evaluate (PDF can be MB)
-    prev_timeout = None
-    try:
-        prev_timeout = 30_000
-        page.set_default_timeout(120_000)
-    except Exception:
-        pass
-    try:
-        result = page.evaluate(
-            """
-            async (url) => {
-                try {
-                    const r = await fetch(url, { credentials: 'include' });
-                    const ct = r.headers.get('content-type') || '';
-                    if (!r.ok || !ct.toLowerCase().includes('pdf')) {
-                        return { ok: false, status: r.status, ct: ct };
-                    }
-                    const blob = await r.blob();
-                    return await new Promise(resolve => {
-                        const fr = new FileReader();
-                        fr.onloadend = () => resolve({
-                            ok: true,
-                            data: fr.result.split(',')[1]
-                        });
-                        fr.onerror = () => resolve({ ok: false, error: 'FileReader error' });
-                        fr.readAsDataURL(blob);
-                    });
-                } catch(e) {
-                    return { ok: false, error: e.message };
-                }
-            }
-            """,
-            pdf_href,
-        )
-        if result and result.get("ok") and result.get("data"):
-            pdf_bytes = base64.b64decode(result["data"])
-            if len(pdf_bytes) > 10_000:
-                print(f"   [Elsevier] ✓ fetch() PDF: {len(pdf_bytes):,} bytes")
-                captured.append(pdf_bytes)
-                return True
-            print(f"   [Elsevier] fetch() response too small ({len(pdf_bytes)} bytes) — not PDF")
-        else:
-            print(f"   [Elsevier] fetch() not PDF: {result}")
-    except Exception as e:
-        print(f"   [Elsevier] fetch() error: {e}")
-    finally:
-        if prev_timeout is not None:
-            try:
-                page.set_default_timeout(prev_timeout)
-            except Exception:
-                pass
-    return False
-
-
 def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> bool:
-    """Download the PDF: try APIRequest first, then urllib, then in-page fetch,
-    then real-user click + S3 route interception, then prompt user."""
+    """Click the PDF button and wait for the response. That is all.
+
+    Earlier in this debugging session we added APIRequest, urllib, in-page
+    fetch, and a stealth init script. Each of those generated requests that
+    the Elsevier WAF flag-counted, escalating from soft block to hard block
+    over many attempts. The simple click-only flow is what worked in commit
+    a988160 and earlier — and it is what works in the user is regular Chrome.
+    """
     from journal_club.pdf_capture import wait_for_pdf
 
-    # Detect the hard-block error page on the article URL itself.
-    # When Elsevier's WAF flag escalates, even the article page returns the
-    # "There was a problem providing the content" error instead of the article.
-    try:
-        if detect_elsevier_hardblock(page):
-            print(f"   [Elsevier] HARDBLOCK on article page itself — session/IP fully flagged")
-            print(f"   [Elsevier] Page URL: {page.url[:100]}")
-            # Save the rendered HTML for inspection
-            try:
-                import tempfile, os as _os
-                diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
-                _os.makedirs(diag_dir, exist_ok=True)
-                diag_path = _os.path.join(diag_dir, f"elsevier-article-block-{int(time.time())}.html")
-                with open(diag_path, "w", encoding="utf-8") as f:
-                    f.write(page.content())
-                print(f"   [Elsevier] Article-block page saved: {diag_path}")
-            except Exception:
-                pass
-            print(f"   [Elsevier] No interactive bypass exists. Wait, retry later, or use personal Chrome.")
-            return False
-    except Exception:
-        pass
+    # Bail if the article page itself is the hard-block (residual WAF flag
+    # from earlier session). Wait for it to expire then retry.
+    if detect_elsevier_hardblock(page):
+        try:
+            url = page.url
+        except Exception:
+            url = "(unknown)"
+        print(f"   [Elsevier] Article page is hard-blocked — WAF flag in effect ({url[:80]})")
+        print(f"   [Elsevier] Wait several hours for the rate-limit flag to expire, then retry")
+        return False
 
     sel = _pdf_button(page)
     if not sel:
-        # No PDF button means either: (a) hardblock landed before our detector
-        # caught it, (b) page is mid-load, or (c) auth didn't actually succeed.
-        # Check title — generic "ScienceDirect" is the hardblock page signature.
         try:
             title = page.title() or ""
         except Exception:
             title = ""
-        print(f"   [Elsevier] No PDF button found on page (title={title!r}, url={page.url[:80]!r})")
+        print(f"   [Elsevier] No PDF button found (title={title[:60]!r}, url={page.url[:80]!r})")
         if title.strip() == "ScienceDirect" or detect_elsevier_hardblock(page):
-            print(f"   [Elsevier] Page looks like hard-block, not real article — aborting")
+            print(f"   [Elsevier] Page looks like hard-block, not real article")
         return False
 
-    pdf_href = _get_pdf_href(page, sel)
-    if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # APIRequest, urllib, and in-page fetch are all blocked by Elsevier's
-        # WAF — proven by repeated 403 + hardblock HTML responses. They send
-        # requests through Node.js / Python network stacks (different TLS JA3
-        # and HTTP/2 fingerprint than Chrome itself), so the WAF rejects them
-        # before any cookies or headers are even checked.
-        #
-        # The ONLY path that has any chance of succeeding is letting Chrome
-        # itself navigate to the URL — Chrome's actual TLS + the stealth init
-        # script we install in browser.py should match the user's personal
-        # Chrome, which they confirmed gets the interactive Turnstile challenge
-        # they can solve manually.
-        #
-        # ── Strategy: Chrome navigates directly + user solves CF Turnstile ──
-        # Chrome's own TLS fingerprint + the stealth init script from
-        # browser.py should match the user's personal Chrome behavior.
-        print(f"   [Elsevier] Navigating Chrome to pdfft URL: {pdf_href[:80]}")
-
-        # Navigate Chrome directly. Chrome's network stack (correct TLS JA3,
-        # HTTP/2 SETTINGS, header order, plus stealth-masked navigator props)
-        # is the only request shape that has worked in the user's regular Chrome.
-        try:
-            page.goto(pdf_href, wait_until="domcontentloaded", timeout=30_000)
-        except Exception as e:
-            # Navigation interrupted by PDF download is normal — pdf_capture
-            # hooks should still fire on the response
-            print(f"   [Elsevier] Navigate to pdfft raised (may be download): {e}")
-
-        time.sleep(3)
-        # Maybe the navigation returned the PDF directly (route hook caught it)
-        if captured:
-            return True
-
-        # Check if Chrome landed on the hard-block page — if so, no challenge
-        # to solve, fail cleanly. The stealth init script should prevent this
-        # but verify in case Cloudflare uses deeper fingerprinting.
-        try:
-            if detect_elsevier_hardblock(page):
-                print(f"   [Elsevier] Chrome navigation also hit hardblock — stealth insufficient")
-                return False
-        except Exception:
-            pass
-
-        # Otherwise: Chrome should now show either the CF Turnstile challenge
-        # (interactive — user can solve) or the PDF is loading. Either way,
-        # bring Chrome to front and let the user complete it.
-        # Wrap title/url reads in try/except — Chrome may be mid-navigation,
-        # in which case the JS execution context is destroyed.
-        try:
-            cur_url = page.url
-        except Exception:
-            cur_url = "(navigating)"
-        try:
-            cur_title = page.title()
-        except Exception:
-            cur_title = "(navigating)"
-        print(f"   [Elsevier] Chrome is on: {cur_url[:100]}")
-        print(f"   [Elsevier] Page title: {cur_title[:80]}")
-
-        # If the page that loaded is the hard-block error page, bail out — no
-        # interactive challenge to solve.
-        try:
-            if detect_elsevier_hardblock(page):
-                print(f"   [Elsevier] HARDBLOCK page loaded in Chrome — no interactive bypass")
-                return False
-        except Exception:
-            pass
-
-        print(f"   [Elsevier] Prompting user to complete verification in Chrome...")
-        emit_cloudflare_alert(page)
-
-        # Hold Chrome open up to 3 minutes while user solves verification.
-        # Once solved, CF/Elsevier issues the PDF response and the route hook
-        # captures it.
-        wait_for_pdf_or_user_action(captured, timeout_s=180)
-        return bool(captured)
-
-    # No pdfft href found — click and let Chrome handle it
     try:
         page.click(sel, timeout=5000)
         print(f"   [Elsevier] Clicked PDF button: {sel}")
@@ -407,14 +109,33 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         print(f"   [Elsevier] PDF click failed ({sel}): {e}")
         return False
 
-    time.sleep(5)
+    # Wait for capture via:
+    #  - direct PDF response intercepted by pdf_capture hooks (route hook on
+    #    pdf.sciencedirectassets.com fires when Chrome follows the redirect), or
+    #  - reader tab opened by ScienceDirect that we follow.
+    time.sleep(3)
     _check_reader_tabs(page, captured)
     if not captured:
-        wait_for_pdf(captured, timeout_s=60, output_dir=output_dir)
+        wait_for_pdf(captured, timeout_s=45, output_dir=output_dir)
     if not captured:
         _check_reader_tabs(page, captured)
-        wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+        wait_for_pdf(captured, timeout_s=20, output_dir=output_dir)
+
+    if captured:
+        return True
+
+    # Last resort: if Chrome ended on a CF/Elsevier challenge page, prompt user.
+    try:
+        if detect_cloudflare_challenge(page) or detect_elsevier_verification(page):
+            kind = "Cloudflare" if detect_cloudflare_challenge(page) else "Elsevier verification"
+            print(f"   [Elsevier] {kind} page detected — prompting user")
+            emit_cloudflare_alert(page)
+            wait_for_pdf_or_user_action(captured, timeout_s=180)
+    except Exception:
+        pass
+
     return bool(captured)
+
 
 
 def _check_reader_tabs(page: Page, captured: list) -> None:
