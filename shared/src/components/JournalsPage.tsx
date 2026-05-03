@@ -8,6 +8,9 @@ interface Props {
   isDesktop?: boolean;
   /** Desktop only: open PDF bytes in the system viewer */
   openPdfExternal?: (bytes: Uint8Array, filename: string) => Promise<void>;
+  /** Bumped by the parent every time a download finishes — triggers
+   * downloadedMap refresh so the View PDF lookup finds the new article. */
+  refreshKey?: number;
 }
 
 type Scope = 1 | 3 | 6 | 12;
@@ -86,7 +89,7 @@ function savePendingBatch(batch: PendingEmailBatch) {
 
 function clearPendingBatch() { localStorage.removeItem(PENDING_KEY); }
 
-export function JournalsPage({ api, isDesktop = false, openPdfExternal }: Props) {
+export function JournalsPage({ api, isDesktop = false, openPdfExternal, refreshKey }: Props) {
   const [journals, setJournals] = useState<Journal[]>([]);
   const [journalStates, setJournalStates] = useState<Record<string, JournalState>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -135,6 +138,11 @@ export function JournalsPage({ api, isDesktop = false, openPdfExternal }: Props)
   }, [api]);
 
   useEffect(() => { refreshDownloadedMap(); }, [refreshDownloadedMap]);
+  // Refresh the downloaded-map every time a download finishes so View PDF
+  // can find the new article immediately. App.tsx bumps refreshKey on done.
+  useEffect(() => {
+    if (refreshKey !== undefined) refreshDownloadedMap();
+  }, [refreshKey, refreshDownloadedMap]);
 
   // Auto-select first followed journal on initial load
   useEffect(() => {

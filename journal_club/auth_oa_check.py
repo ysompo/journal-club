@@ -65,7 +65,18 @@ def detect_cloudflare_challenge(page: Page) -> bool:
         title = (page.title() or "").lower()
     except Exception:
         title = ""
-    if "just a moment" in title or "cloudflare" in title:
+    # CF (and CF-fronted services like sciencedirectassets.com) use multiple
+    # challenge page titles. Match all known variants.
+    challenge_title_markers = (
+        "just a moment",
+        "cloudflare",
+        "security verification",        # sciencedirectassets.com
+        "verify you are human",
+        "verifying you are human",
+        "checking your browser",
+        "attention required",
+    )
+    if any(m in title for m in challenge_title_markers):
         return True
     try:
         if page.locator("input[name='cf-turnstile-response']").count() > 0:
@@ -74,6 +85,14 @@ def detect_cloudflare_challenge(page: Page) -> bool:
         pass
     try:
         if page.locator("iframe[src*='challenges.cloudflare.com']").count() > 0:
+            return True
+    except Exception:
+        pass
+    # Body-text fallback for CF challenge pages without classic markers
+    try:
+        if page.locator("text=Verify you are human").count() > 0:
+            return True
+        if page.locator("text=Verifying you are human").count() > 0:
             return True
     except Exception:
         pass
