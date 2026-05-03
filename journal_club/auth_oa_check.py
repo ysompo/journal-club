@@ -99,6 +99,32 @@ def detect_elsevier_verification(page: Page) -> bool:
     return False
 
 
+def detect_elsevier_hardblock(page: Page) -> bool:
+    """Detect Elsevier's hard-block error page ('There was a problem providing
+    the content you requested'). This page has NO interactive challenge — it's
+    served when the WAF has flagged the session/IP. No amount of waiting or
+    clicking will bypass it from the same session.
+    """
+    try:
+        if page.locator("h1:has-text('There was a problem providing the content')").count() > 0:
+            return True
+        if page.locator("text=There was a problem providing the content you requested").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def detect_elsevier_hardblock_html(html_bytes: bytes) -> bool:
+    """Same as detect_elsevier_hardblock but works on raw response bytes.
+    Used when we have an APIRequest response body without a live Page object."""
+    try:
+        text = html_bytes.decode("utf-8", errors="ignore")
+        return "There was a problem providing the content you requested" in text
+    except Exception:
+        return False
+
+
 def wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
     try:
         page.wait_for_function(

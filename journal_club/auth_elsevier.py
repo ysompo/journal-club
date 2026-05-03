@@ -5,8 +5,14 @@ from playwright.sync_api import Page
 
 from journal_club.auth_oa_check import (
     detect_cloudflare_challenge, detect_elsevier_verification,
+    detect_elsevier_hardblock, detect_elsevier_hardblock_html,
     emit_cloudflare_alert, wait_for_cf_clear, wait_for_pdf_or_user_action,
 )
+
+
+class ElsevierHardBlockError(RuntimeError):
+    """Raised when Elsevier's WAF hard-blocks the session — no interactive bypass exists."""
+    pass
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 _HUJI_ENTITY_ID = "https://idp.huji.ac.il/idp/shibboleth"
@@ -111,7 +117,7 @@ def _fetch_pdf_via_api_request(page: Page, pdf_href: str, captured: list) -> boo
             captured.append(body)
             return True
         print(f"   [Elsevier] APIRequest non-PDF (first 16 bytes: {body[:16]!r})")
-        # Save the response body for diagnostic inspection (CF challenge HTML, etc.)
+        # Save the response body for diagnostic inspection
         try:
             import tempfile, os as _os
             diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
@@ -123,6 +129,17 @@ def _fetch_pdf_via_api_request(page: Page, pdf_href: str, captured: list) -> boo
             print(f"   [Elsevier] Block response saved for inspection: {diag_path}")
         except Exception:
             pass
+        # Detect the hard-block error page so we don't waste time on fallbacks
+        # that cannot succeed against this WAF state.
+        if detect_elsevier_hardblock_html(body):
+            raise ElsevierHardBlockError(
+                "Elsevier WAF hard-block: 'There was a problem providing the content you "
+                "requested'. The session/IP is flagged — no interactive bypass exists. "
+                "Try again later, try a different article, or download manually in your "
+                f"personal Chrome. Diagnostic page: {diag_path}"
+            )
+    except ElsevierHardBlockError:
+        raise
     except Exception as e:
         print(f"   [Elsevier] APIRequest error: {type(e).__name__}: {e}")
     return False
@@ -278,8 +295,15 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         # Uses Chrome's network stack (correct TLS), inherits all session
         # cookies, sets navigation-style Sec-Fetch headers, and bypasses any
         # installed Chrome extensions. Most likely to succeed.
-        if _fetch_pdf_via_api_request(page, pdf_href, captured):
-            return True
+        try:
+            if _fetch_pdf_via_api_request(page, pdf_href, captured):
+                return True
+        except ElsevierHardBlockError as e:
+            # WAF hard-block — no interactive bypass. Surface the error
+            # cleanly to the user and stop trying.
+            print(f"   [Elsevier] HARDBLOCK detected — aborting all strategies")
+            print(f"   [Elsevier] {e}")
+            return False
 
         # ── Strategy 2: urllib with browser cookies ─────────────────────────
         # Fallback if APIRequest somehow fails. Different network stack so
@@ -316,11 +340,29 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
             return True
 
         # Step B: prompt the user with the Chrome window in front. The popup
-        # message guides them to solve whatever's on screen (CF Turnstile, etc.)
-        # The bring_download_to_front Tauri command (triggered by the popup
-        # button) brings the Chrome window forward via Win32 SetForegroundWindow.
-        print(f"   [Elsevier] Chrome is on: {page.url[:100]}")
-        print(f"   [Elsevier] Page title: {page.title()[:80]}")
+        # message guides them to solve whatever's on screen.
+        # Wrap title/url reads in try/except — Chrome may be mid-navigation,
+        # in which case the JS execution context is destroyed.
+        try:
+            cur_url = page.url
+        except Exception:
+            cur_url = "(navigating)"
+        try:
+            cur_title = page.title()
+        except Exception:
+            cur_title = "(navigating)"
+        print(f"   [Elsevier] Chrome is on: {cur_url[:100]}")
+        print(f"   [Elsevier] Page title: {cur_title[:80]}")
+
+        # If the page that loaded is the hard-block error page, bail out — no
+        # interactive challenge to solve.
+        try:
+            if detect_elsevier_hardblock(page):
+                print(f"   [Elsevier] HARDBLOCK page loaded in Chrome — no interactive bypass")
+                return False
+        except Exception:
+            pass
+
         print(f"   [Elsevier] Prompting user to complete verification in Chrome...")
         emit_cloudflare_alert(page)
 
