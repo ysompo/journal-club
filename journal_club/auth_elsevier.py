@@ -284,9 +284,41 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
     then real-user click + S3 route interception, then prompt user."""
     from journal_club.pdf_capture import wait_for_pdf
 
+    # Detect the hard-block error page on the article URL itself.
+    # When Elsevier's WAF flag escalates, even the article page returns the
+    # "There was a problem providing the content" error instead of the article.
+    try:
+        if detect_elsevier_hardblock(page):
+            print(f"   [Elsevier] HARDBLOCK on article page itself — session/IP fully flagged")
+            print(f"   [Elsevier] Page URL: {page.url[:100]}")
+            # Save the rendered HTML for inspection
+            try:
+                import tempfile, os as _os
+                diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
+                _os.makedirs(diag_dir, exist_ok=True)
+                diag_path = _os.path.join(diag_dir, f"elsevier-article-block-{int(time.time())}.html")
+                with open(diag_path, "w", encoding="utf-8") as f:
+                    f.write(page.content())
+                print(f"   [Elsevier] Article-block page saved: {diag_path}")
+            except Exception:
+                pass
+            print(f"   [Elsevier] No interactive bypass exists. Wait, retry later, or use personal Chrome.")
+            return False
+    except Exception:
+        pass
+
     sel = _pdf_button(page)
     if not sel:
-        print("   [Elsevier] No PDF button found on page")
+        # No PDF button means either: (a) hardblock landed before our detector
+        # caught it, (b) page is mid-load, or (c) auth didn't actually succeed.
+        # Check title — generic "ScienceDirect" is the hardblock page signature.
+        try:
+            title = page.title() or ""
+        except Exception:
+            title = ""
+        print(f"   [Elsevier] No PDF button found on page (title={title!r}, url={page.url[:80]!r})")
+        if title.strip() == "ScienceDirect" or detect_elsevier_hardblock(page):
+            print(f"   [Elsevier] Page looks like hard-block, not real article — aborting")
         return False
 
     pdf_href = _get_pdf_href(page, sel)
