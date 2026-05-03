@@ -3,6 +3,7 @@ export type { Page } from "./Sidebar";
 export { ArticleRow } from "./ArticleRow";
 export type { DownloadStatus } from "./ArticleRow";
 export { JournalsPage } from "./JournalsPage";
+export { ArticlesPage } from "./ArticlesPage";
 export { LibraryPage } from "./LibraryPage";
 export { HistoryPage } from "./HistoryPage";
 export { BookmarksPage } from "./BookmarksPage";

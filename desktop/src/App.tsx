@@ -14,7 +14,7 @@ import { loadStoredToken, saveToken, clearToken, needsServerSetup } from "./stor
 import { useKeychain } from "./hooks/useKeychain";
 import { useQueuePoller } from "./hooks/useQueuePoller";
 import { api } from "@jc/shared";
-import { Sidebar, JournalsPage, LibraryPage, BookmarksPage, QueuePage } from "@jc/shared/components";
+import { Sidebar, JournalsPage, ArticlesPage, LibraryPage, BookmarksPage, QueuePage } from "@jc/shared/components";
 import type { Page } from "@jc/shared/components";
 
 type AppState = "server-setup" | "loading" | "unauthenticated" | "needs-huji" | "authenticated";
@@ -163,11 +163,13 @@ function App() {
               <JournalsPage
                 api={api}
                 isDesktop
+                refreshKey={refreshKey}
                 openPdfExternal={async (bytes, filename) => {
                   await invoke("open_pdf_external", { bytes: Array.from(bytes), filename });
                 }}
               />
             )}
+            {currentPage === "articles" && <ArticlesPage api={api} />}
             {currentPage === "library" && (
               <LibraryPage
                 api={api}

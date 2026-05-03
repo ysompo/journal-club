@@ -1,6 +1,6 @@
 import { type CSSProperties } from "react";
 
-export type Page = "journals" | "library" | "bookmarks" | "queue" | "settings" | "admin";
+export type Page = "journals" | "articles" | "library" | "bookmarks" | "queue" | "settings" | "admin";
 
 interface Props {
   current: Page;
@@ -11,6 +11,7 @@ interface Props {
 
 const NAV_ITEMS: { page: Page; label: string; icon: string }[] = [
   { page: "journals",  label: "Journals",  icon: "◎" },
+  { page: "articles",  label: "Articles",  icon: "✦" },
   { page: "library",   label: "Library",   icon: "▤" },
   { page: "bookmarks", label: "Bookmarks", icon: "◈" },
   { page: "queue",     label: "Queue",     icon: "↓" },
