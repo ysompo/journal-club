@@ -68,6 +68,54 @@ def _get_pdf_href(page: Page, sel: str) -> str | None:
     return None
 
 
+def _fetch_pdf_via_api_request(page: Page, pdf_href: str, captured: list) -> bool:
+    """Download the PDF via Playwright's APIRequestContext.
+
+    This uses Chrome's actual network stack (correct TLS fingerprint), inherits
+    all session cookies from the BrowserContext automatically, and bypasses any
+    Chrome extensions (Adobe Acrobat etc) — extensions only intercept in-page
+    traffic, not Node-side APIRequestContext requests. We can also set
+    Sec-Fetch-* headers to look like a real document navigation, which matters
+    because Elsevier serves verification HTML to anything tagged as XHR.
+    """
+    print(f"   [Elsevier] APIRequest GET {pdf_href[:80]}")
+    try:
+        article_url = page.url
+        try:
+            ua = page.evaluate("() => navigator.userAgent")
+        except Exception:
+            ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/147.0.0.0 Safari/537.36")
+        resp = page.context.request.get(
+            pdf_href,
+            headers={
+                "Referer": article_url,
+                "User-Agent": ua,
+                "Accept": "application/pdf,application/x-pdf,*/*;q=0.9",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+            },
+            timeout=60_000,
+            max_redirects=10,
+        )
+        body = resp.body()
+        ct = (resp.headers.get("content-type") or "").lower()
+        print(f"   [Elsevier] APIRequest: {resp.status} {ct[:40]} ({len(body):,} bytes)")
+        if body[:4] == b"%PDF" and len(body) > 10_000:
+            print(f"   [Elsevier] ✓ APIRequest PDF: {len(body):,} bytes")
+            captured.append(body)
+            return True
+        print(f"   [Elsevier] APIRequest non-PDF (first 16 bytes: {body[:16]!r})")
+    except Exception as e:
+        print(f"   [Elsevier] APIRequest error: {type(e).__name__}: {e}")
+    return False
+
+
 def _fetch_pdf_via_urllib(page: Page, pdf_href: str, captured: list) -> bool:
     """Download the PDF via urllib using cookies extracted from the browser.
 
@@ -203,7 +251,8 @@ def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
 
 
 def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> bool:
-    """Download the PDF: try in-page fetch() first, fall back to click."""
+    """Download the PDF: try APIRequest first, then urllib, then in-page fetch,
+    then real-user click + S3 route interception, then prompt user."""
     from journal_club.pdf_capture import wait_for_pdf
 
     sel = _pdf_button(page)
@@ -213,13 +262,29 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
 
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # Click the PDF link with a real user gesture — no JS overrides, no
-        # window.open intercept, no urllib. Chrome handles the pdfft handshake
-        # natively (correct TLS fingerprint, JS-issued crasolve token), then
-        # follows the redirect to pdf.sciencedirectassets.com (the S3 CDN).
-        # pdf_capture.py's route interceptor catches the S3 response and grabs
-        # the real PDF bytes before any client code (or extension) touches them.
-        print(f"   [Elsevier] Clicking PDF link with user gesture: {pdf_href[:80]}")
+        # ── Strategy 1: Playwright APIRequestContext ────────────────────────
+        # Uses Chrome's network stack (correct TLS), inherits all session
+        # cookies, sets navigation-style Sec-Fetch headers, and bypasses any
+        # installed Chrome extensions. Most likely to succeed.
+        if _fetch_pdf_via_api_request(page, pdf_href, captured):
+            return True
+
+        # ── Strategy 2: urllib with browser cookies ─────────────────────────
+        # Fallback if APIRequest somehow fails. Different network stack so
+        # may or may not pass Elsevier's WAF.
+        if _fetch_pdf_via_urllib(page, pdf_href, captured):
+            return True
+
+        # ── Strategy 3: in-page fetch() ─────────────────────────────────────
+        if _fetch_pdf_via_js(page, pdf_href, captured):
+            return True
+
+        # ── Strategy 4: real user-gesture click + S3 route hook ─────────────
+        # Chrome handles the pdfft handshake natively (correct TLS, JS-issued
+        # crasolve token), follows the redirect to pdf.sciencedirectassets.com
+        # (S3 CDN, no Cloudflare), and pdf_capture.py's route interceptor
+        # grabs the bytes before Chrome's PDF viewer or any extension.
+        print(f"   [Elsevier] All HTTP fetches failed — clicking PDF link with user gesture: {pdf_href[:80]}")
         try:
             # dispatchEvent('click', {bubbles:true}) most closely mimics a
             # human click — ScienceDirect's own JS runs and constructs a

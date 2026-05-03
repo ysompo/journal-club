@@ -195,9 +195,13 @@ _LOG_PATH: str = ""
 
 
 def _setup_log(queue_item_id: str) -> str:
+    import time as _time
     log_dir = os.path.join(tempfile.gettempdir(), "jc_downloads", "logs")
     os.makedirs(log_dir, exist_ok=True)
-    path = os.path.join(log_dir, f"sidecar-{queue_item_id}.log")
+    # Include epoch_ms so retries (manual or automatic) don't overwrite earlier
+    # logs — every attempt gets its own preserved transcript.
+    epoch_ms = int(_time.time() * 1000)
+    path = os.path.join(log_dir, f"sidecar-{queue_item_id}-{epoch_ms}.log")
     # buffering=1 → line-buffered so each newline flushes to disk immediately,
     # so a crashed/killed sidecar still leaves a complete log up to the last line.
     fh = open(path, "w", encoding="utf-8", errors="replace", buffering=1)

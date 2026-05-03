@@ -56,6 +56,11 @@ _CLONE_IGNORE = {
     "Extensions", "Extension Rules", "Extension Scripts", "Extension State",
     "Local Extension Settings", "Managed Extension Settings",
     "Sync Extension Settings",
+    # Sync-related state — Chrome can re-install extensions from these via the
+    # signed-in account. Strip them so the JC profile is sync-isolated.
+    "Sync Data", "Sync Data Backup",
+    "Web Data", "Web Data-journal",
+    "Account Tracker Service", "AccountConsistencyService",
 }
 
 
