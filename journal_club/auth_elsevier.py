@@ -77,6 +77,13 @@ def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
     """
     import base64
     print(f"   [Elsevier] Trying in-page fetch() for PDF...")
+    # Bump default timeout for this single long-running evaluate (PDF can be MB)
+    prev_timeout = None
+    try:
+        prev_timeout = 30_000
+        page.set_default_timeout(120_000)
+    except Exception:
+        pass
     try:
         result = page.evaluate(
             """
@@ -103,7 +110,6 @@ def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
             }
             """,
             pdf_href,
-            timeout=90_000,
         )
         if result and result.get("ok") and result.get("data"):
             pdf_bytes = base64.b64decode(result["data"])
@@ -116,6 +122,12 @@ def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
             print(f"   [Elsevier] fetch() not PDF: {result}")
     except Exception as e:
         print(f"   [Elsevier] fetch() error: {e}")
+    finally:
+        if prev_timeout is not None:
+            try:
+                page.set_default_timeout(prev_timeout)
+            except Exception:
+                pass
     return False
 
 
