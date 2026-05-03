@@ -1,5 +1,6 @@
 # journal_club/auth_openathens.py
 import re
+import sys
 import time
 from urllib.parse import urlparse, quote
 from playwright.sync_api import Page

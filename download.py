@@ -146,7 +146,7 @@ def download_article(input_str: str, cfg: Config, abort_check=None) -> tuple[Art
             if abort_check and abort_check():
                 raise DownloadCancelledError("Download cancelled by user")
 
-            oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20)
+            oa_ok, pdf_url = check_open_access(page, context, captured, timeout_s=20, output_dir=cfg.output_dir)
 
             if not oa_ok and not captured:
                 auth_kwargs = dict(

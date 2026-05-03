@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-import aiosqlite, uuid, httpx, json, os
+import aiosqlite, uuid, httpx, json, os, html, re
 from datetime import datetime, timezone, timedelta
 from xml.etree import ElementTree
+
+
+def _strip_html(text: str) -> str:
+    text = re.sub(r'<[^>]+>', '', text)
+    return html.unescape(text).strip()
 
 from database import get_db
 from routers.users import get_current_user
@@ -62,8 +67,8 @@ async def _fetch_pubmed_toc(issn: str, months: int, abbreviation: str = "") -> l
     for r in results:
         try:
             pmid = r.get("pmid") or ""
-            title = r.get("title") or ""
-            abstract = r.get("abstractText")
+            title = _strip_html(r.get("title") or "")
+            abstract = _strip_html(r.get("abstractText") or "") or None
             doi = r.get("doi")
             journal_name = (r.get("journalInfo") or {}).get("journal", {}).get("title") or ""
             pub_date = r.get("firstPublicationDate") or ""
