@@ -213,50 +213,51 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
 
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # Primary: urllib with browser cookies — no automation/SAML fingerprint
-        if _fetch_pdf_via_urllib(page, pdf_href, captured):
-            return True
-
-        # Secondary: in-page fetch() — same-origin XHR, no navigation
-        if _fetch_pdf_via_js(page, pdf_href, captured):
-            return True
-
-        # Fallback: click with window.open intercepted so no second tab opens
-        print(f"   [Elsevier] urllib + fetch() both failed — falling back to click")
+        # Click the PDF link with a real user gesture — no JS overrides, no
+        # window.open intercept, no urllib. Chrome handles the pdfft handshake
+        # natively (correct TLS fingerprint, JS-issued crasolve token), then
+        # follows the redirect to pdf.sciencedirectassets.com (the S3 CDN).
+        # pdf_capture.py's route interceptor catches the S3 response and grabs
+        # the real PDF bytes before any client code (or extension) touches them.
+        print(f"   [Elsevier] Clicking PDF link with user gesture: {pdf_href[:80]}")
         try:
-            page.evaluate("""
-                () => {
-                    window.open = (url) => { if (url) window.location.href = url; };
-                    document.querySelectorAll(
-                        'a[href*="pdfft"], a[href*="showPdf"], a[href*="/doi/pdf"]'
-                    ).forEach(el => el.removeAttribute('target'));
-                }
-            """)
-        except Exception:
-            pass
-        try:
-            page.click(sel, timeout=5000)
+            # dispatchEvent('click', {bubbles:true}) most closely mimics a
+            # human click — ScienceDirect's own JS runs and constructs a
+            # legitimate request with their token.
+            page.locator(sel).first.click(timeout=5000)
         except Exception as e:
             print(f"   [Elsevier] Click raised (may be download): {e}")
 
+        # Watch for either:
+        #  - PDF captured via the S3 CDN route hook in pdf_capture.py
+        #  - A new tab opened by ScienceDirect that we should follow
         time.sleep(3)
+        _check_reader_tabs(page, captured)
 
-        # Detect any verification page (CF or Elsevier) and prompt user
-        if detect_cloudflare_challenge(page) or detect_elsevier_verification(page):
-            kind = "Cloudflare" if detect_cloudflare_challenge(page) else "Elsevier verification"
-            print(f"   [Elsevier] {kind} page — prompting user (Chrome stays open)")
-            emit_cloudflare_alert(page)
-            # Hold Chrome open for up to 3 min while user solves verification.
-            # Polling captured directly — no early exit on title/iframe heuristics.
-            wait_for_pdf_or_user_action(captured, timeout_s=180)
-            return bool(captured)
+        wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+        if captured:
+            return True
+        _check_reader_tabs(page, captured)
+        if captured:
+            return True
 
-        # No verification page detected — short wait for natural PDF capture
-        wait_for_pdf(captured, timeout_s=15, output_dir=output_dir)
-        if not captured:
-            print("   [Elsevier] PDF not captured after 15s — prompting user to check Chrome")
-            emit_cloudflare_alert(page)
-            wait_for_pdf_or_user_action(captured, timeout_s=180)
+        # Still nothing — check if we landed on a verification page on any tab
+        all_pages = list(page.context.pages)
+        for p in all_pages:
+            try:
+                if detect_cloudflare_challenge(p) or detect_elsevier_verification(p):
+                    kind = "Cloudflare" if detect_cloudflare_challenge(p) else "Elsevier verification"
+                    print(f"   [Elsevier] {kind} page on tab {p.url[:60]} — prompting user")
+                    emit_cloudflare_alert(p)
+                    wait_for_pdf_or_user_action(captured, timeout_s=180)
+                    return bool(captured)
+            except Exception:
+                pass
+
+        # No verification page detected but no PDF either — prompt user anyway
+        print("   [Elsevier] PDF not captured after 30s — prompting user to check Chrome")
+        emit_cloudflare_alert(page)
+        wait_for_pdf_or_user_action(captured, timeout_s=180)
         return bool(captured)
 
     # No pdfft href found — click and let Chrome handle it
