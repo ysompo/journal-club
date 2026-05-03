@@ -127,6 +127,21 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         url_after = "(unreadable)"
     print(f"   [Elsevier] Post-click +3s: {tabs_after} tab(s), main page url={'changed' if url_after != url_before else 'unchanged'} ({url_after[:80]})")
 
+    # If the click had no visible effect on Playwright's view (no new tab in
+    # context, main page URL unchanged), Chrome likely opened a popup tab that
+    # Playwright's CDP attach doesn't track — the response hooks miss it. Force
+    # same-tab navigation to the pdfft URL so the response goes through the
+    # tracked tab, which fires pdf_capture's response hook + S3 route hook.
+    if tabs_after == tabs_before and url_after == url_before and href_before:
+        print(f"   [Elsevier] Click had no visible effect — navigating same tab to pdfft URL")
+        try:
+            page.goto(href_before, wait_until="domcontentloaded", timeout=30_000)
+        except Exception as e:
+            # Navigation interrupted by PDF download is normal — pdf_capture
+            # hooks should still fire on the response
+            print(f"   [Elsevier] Goto raised (may be download): {e}")
+        time.sleep(2)
+
     # Wait for capture via:
     #  - direct PDF response intercepted by pdf_capture hooks (route hook on
     #    pdf.sciencedirectassets.com fires when Chrome follows the redirect), or
