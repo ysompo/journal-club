@@ -291,56 +291,51 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
 
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # ── Strategy 1: Playwright APIRequestContext ────────────────────────
-        # Uses Chrome's network stack (correct TLS), inherits all session
-        # cookies, sets navigation-style Sec-Fetch headers, and bypasses any
-        # installed Chrome extensions. Most likely to succeed.
-        try:
-            if _fetch_pdf_via_api_request(page, pdf_href, captured):
-                return True
-        except ElsevierHardBlockError as e:
-            # WAF hard-block — no interactive bypass. Surface the error
-            # cleanly to the user and stop trying.
-            print(f"   [Elsevier] HARDBLOCK detected — aborting all strategies")
-            print(f"   [Elsevier] {e}")
-            return False
+        # APIRequest, urllib, and in-page fetch are all blocked by Elsevier's
+        # WAF — proven by repeated 403 + hardblock HTML responses. They send
+        # requests through Node.js / Python network stacks (different TLS JA3
+        # and HTTP/2 fingerprint than Chrome itself), so the WAF rejects them
+        # before any cookies or headers are even checked.
+        #
+        # The ONLY path that has any chance of succeeding is letting Chrome
+        # itself navigate to the URL — Chrome's actual TLS + the stealth init
+        # script we install in browser.py should match the user's personal
+        # Chrome, which they confirmed gets the interactive Turnstile challenge
+        # they can solve manually.
+        #
+        # ── Strategy: Chrome navigates directly + user solves CF Turnstile ──
+        # Chrome's own TLS fingerprint + the stealth init script from
+        # browser.py should match the user's personal Chrome behavior.
+        print(f"   [Elsevier] Navigating Chrome to pdfft URL: {pdf_href[:80]}")
 
-        # ── Strategy 2: urllib with browser cookies ─────────────────────────
-        # Fallback if APIRequest somehow fails. Different network stack so
-        # may or may not pass Elsevier's WAF.
-        if _fetch_pdf_via_urllib(page, pdf_href, captured):
-            return True
-
-        # ── Strategy 3: in-page fetch() ─────────────────────────────────────
-        if _fetch_pdf_via_js(page, pdf_href, captured):
-            return True
-
-        # ── Strategy 4: real user-gesture click + S3 route hook ─────────────
-        # Chrome handles the pdfft handshake natively (correct TLS, JS-issued
-        # crasolve token), follows the redirect to pdf.sciencedirectassets.com
-        # (S3 CDN, no Cloudflare), and pdf_capture.py's route interceptor
-        # grabs the bytes before Chrome's PDF viewer or any extension.
-        # All programmatic strategies blocked. Surface Chrome to the user with
-        # the verification page LOADED so they can solve the challenge that
-        # gates the PDF.
-        print(f"   [Elsevier] All HTTP fetches failed — escalating to user (Chrome interactive)")
-
-        # Step A: navigate Chrome directly to the pdfft URL so the verification
-        # page (CF Turnstile, etc.) renders interactively. The earlier click()
-        # approach landed on something the user couldn't see/interact with.
+        # Navigate Chrome directly. Chrome's network stack (correct TLS JA3,
+        # HTTP/2 SETTINGS, header order, plus stealth-masked navigator props)
+        # is the only request shape that has worked in the user's regular Chrome.
         try:
             page.goto(pdf_href, wait_until="domcontentloaded", timeout=30_000)
         except Exception as e:
-            # Navigation interrupted by download is normal
-            print(f"   [Elsevier] Navigate to pdfft raised: {e}")
+            # Navigation interrupted by PDF download is normal — pdf_capture
+            # hooks should still fire on the response
+            print(f"   [Elsevier] Navigate to pdfft raised (may be download): {e}")
 
         time.sleep(3)
-        # Maybe the navigation alone returned the PDF (route hook caught it)
+        # Maybe the navigation returned the PDF directly (route hook caught it)
         if captured:
             return True
 
-        # Step B: prompt the user with the Chrome window in front. The popup
-        # message guides them to solve whatever's on screen.
+        # Check if Chrome landed on the hard-block page — if so, no challenge
+        # to solve, fail cleanly. The stealth init script should prevent this
+        # but verify in case Cloudflare uses deeper fingerprinting.
+        try:
+            if detect_elsevier_hardblock(page):
+                print(f"   [Elsevier] Chrome navigation also hit hardblock — stealth insufficient")
+                return False
+        except Exception:
+            pass
+
+        # Otherwise: Chrome should now show either the CF Turnstile challenge
+        # (interactive — user can solve) or the PDF is loading. Either way,
+        # bring Chrome to front and let the user complete it.
         # Wrap title/url reads in try/except — Chrome may be mid-navigation,
         # in which case the JS execution context is destroyed.
         try:
