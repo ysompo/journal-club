@@ -9,6 +9,7 @@ Usage:
 """
 from __future__ import annotations
 
+import html
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -16,6 +17,12 @@ from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML/XML tags and decode entities from metadata strings."""
+    text = re.sub(r'<[^>]+>', '', text)
+    return html.unescape(text).strip()
 
 _HEADERS = {
     "User-Agent": (
@@ -99,7 +106,7 @@ def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
                         parts.append(f"{label}: {text}")
                     elif text:
                         parts.append(text)
-                abstracts[pmid_val] = " ".join(parts)
+                abstracts[pmid_val] = _strip_html(" ".join(parts))
         except Exception as e:
             print(f"   [TOC/PubMed] Abstract fetch error: {e}")
 
@@ -111,7 +118,7 @@ def scrape_via_pubmed(issn: str, reldate: int = 0) -> TocResult:
             if not doc or doc.get("error"):
                 continue
 
-            title = doc.get("title", "").rstrip(".")
+            title = _strip_html(doc.get("title", "")).rstrip(".")
             if not title:
                 continue
 

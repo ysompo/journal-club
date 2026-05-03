@@ -168,7 +168,7 @@ def wait_for_pdf_or_user_action(captured: list, timeout_s: int = 180) -> bool:
     return bool(captured)
 
 
-def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list) -> bool:
+def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list, output_dir: str | None = None) -> bool:
     """For Wiley OA articles, /doi/pdfdirect/{doi} streams the PDF binary
     directly without requiring institutional auth. Try this before falling
     through to HUJI Shibboleth.
@@ -201,7 +201,7 @@ def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list) ->
             try: pdf_tab.close()
             except Exception: pass
             return False
-        wait_for_pdf(captured, timeout_s=20)
+        wait_for_pdf(captured, timeout_s=20, output_dir=output_dir)
         try:
             pdf_tab.close()
         except Exception:
@@ -231,7 +231,7 @@ _PDF_LINK_JS = """
 }
 """
 
-def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout_s: int = 15) -> bool:
+def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout_s: int = 15, output_dir: str | None = None) -> bool:
     """Try Wiley's /doi/epdf/ pattern for open-access articles. Returns True if PDF captured.
 
     /doi/epdf/ is Wiley's in-browser reader (HTML wrapper around an iframe), not
@@ -272,7 +272,7 @@ def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout
                 pdf_tab.goto(iframe_pdf, wait_until="commit", timeout=10_000)
             except Exception:
                 pass
-            wait_for_pdf(captured, timeout_s=30)
+            wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
             pdf_tab.close()
             if captured:
                 print("   [OA Check] ✓ Wiley epdf iframe successful!")
@@ -287,7 +287,8 @@ def _try_wiley_epdf(page: Page, context: BrowserContext, captured: list, timeout
 
 
 def check_open_access(page: Page, context: BrowserContext,
-                      captured: list, timeout_s: int = 15) -> tuple[bool, str | None]:
+                      captured: list, timeout_s: int = 15,
+                      output_dir: str | None = None) -> tuple[bool, str | None]:
     """
     Navigate to article_url (already loaded on page), look for a direct PDF link.
     If found, open it in a new tab and wait for PDF capture.
@@ -303,11 +304,11 @@ def check_open_access(page: Page, context: BrowserContext,
         wait_for_cf_clear(page)
 
     # Wiley OA: pdfdirect streams the PDF binary, no auth needed
-    if _try_wiley_pdfdirect(page, context, captured):
+    if _try_wiley_pdfdirect(page, context, captured, output_dir=output_dir):
         return True, None
 
     # Fallback: Wiley epdf reader (rarely yields PDF iframe)
-    if _try_wiley_epdf(page, context, captured, timeout_s):
+    if _try_wiley_epdf(page, context, captured, timeout_s, output_dir=output_dir):
         return True, None
 
     print("[OA Check] Scanning DOM for direct PDF link...")
@@ -360,7 +361,7 @@ def check_open_access(page: Page, context: BrowserContext,
         # cache; give it more headroom before falling through to the auth flow.
         host = (page.url or "").lower()
         slow_atypon = any(h in host for h in ("wiley.com", "nejm.org", "bmj.com"))
-        wait_for_pdf(captured, timeout_s=45 if slow_atypon else timeout_s)
+        wait_for_pdf(captured, timeout_s=45 if slow_atypon else timeout_s, output_dir=output_dir)
 
     if captured:
         print("   [OA Check] Open access confirmed — PDF captured!")
