@@ -68,6 +68,77 @@ def _get_pdf_href(page: Page, sel: str) -> str | None:
     return None
 
 
+def _fetch_pdf_via_urllib(page: Page, pdf_href: str, captured: list) -> bool:
+    """Download the PDF via urllib using cookies extracted from the browser.
+
+    Elsevier's pdfft endpoint hard-blocks any client coming from the SAML/OAuth
+    session inside the browser (HTML returned even for fetch()). urllib has no
+    automation fingerprint, no SAML session signature — just an authenticated
+    HTTP request with cookies copied from the browser context.
+    """
+    import urllib.request
+    import urllib.error
+    import http.cookiejar
+
+    print(f"   [Elsevier] Trying urllib download with browser cookies...")
+    try:
+        # Pull all cookies for sciencedirect.com / elsevier.com from the context
+        jar = http.cookiejar.CookieJar()
+        for c in page.context.cookies():
+            domain = c.get("domain", "")
+            if not any(d in domain for d in ("sciencedirect.com", "elsevier.com")):
+                continue
+            ck = http.cookiejar.Cookie(
+                version=0,
+                name=c["name"],
+                value=c["value"],
+                port=None, port_specified=False,
+                domain=domain, domain_specified=bool(domain),
+                domain_initial_dot=domain.startswith("."),
+                path=c.get("path", "/"), path_specified=True,
+                secure=c.get("secure", False),
+                expires=int(c["expires"]) if c.get("expires", -1) > 0 else None,
+                discard=False, comment=None, comment_url=None, rest={},
+            )
+            jar.set_cookie(ck)
+
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+        # Mimic a normal browser request originating from the article page
+        article_url = page.url
+        ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36")
+        headers = {
+            "User-Agent": ua,
+            "Accept": "application/pdf,application/x-pdf,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": article_url,
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
+        req = urllib.request.Request(pdf_href, headers=headers)
+        with opener.open(req, timeout=60) as resp:
+            ct = resp.headers.get("Content-Type", "").lower()
+            data = resp.read()
+            print(f"   [Elsevier] urllib response: {resp.status} {ct[:40]} ({len(data):,} bytes)")
+            if data[:4] == b"%PDF" or "pdf" in ct:
+                if data[:4] == b"%PDF" and len(data) > 10_000:
+                    print(f"   [Elsevier] ✓ urllib PDF: {len(data):,} bytes")
+                    captured.append(data)
+                    return True
+                print(f"   [Elsevier] urllib response not a valid PDF (header: {data[:8]!r})")
+            else:
+                print(f"   [Elsevier] urllib returned non-PDF (likely verification HTML)")
+    except urllib.error.HTTPError as e:
+        print(f"   [Elsevier] urllib HTTP error: {e.code} {e.reason}")
+    except Exception as e:
+        print(f"   [Elsevier] urllib error: {type(e).__name__}: {e}")
+    return False
+
+
 def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
     """Download PDF via in-page fetch() — bypasses Elsevier bot detection.
 
@@ -142,12 +213,16 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
 
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # Primary: in-page fetch() — no navigation, no automation fingerprint
+        # Primary: urllib with browser cookies — no automation/SAML fingerprint
+        if _fetch_pdf_via_urllib(page, pdf_href, captured):
+            return True
+
+        # Secondary: in-page fetch() — same-origin XHR, no navigation
         if _fetch_pdf_via_js(page, pdf_href, captured):
             return True
 
         # Fallback: click with window.open intercepted so no second tab opens
-        print(f"   [Elsevier] fetch() failed — falling back to click")
+        print(f"   [Elsevier] urllib + fetch() both failed — falling back to click")
         try:
             page.evaluate("""
                 () => {
