@@ -111,6 +111,18 @@ def _fetch_pdf_via_api_request(page: Page, pdf_href: str, captured: list) -> boo
             captured.append(body)
             return True
         print(f"   [Elsevier] APIRequest non-PDF (first 16 bytes: {body[:16]!r})")
+        # Save the response body for diagnostic inspection (CF challenge HTML, etc.)
+        try:
+            import tempfile, os as _os
+            diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
+            _os.makedirs(diag_dir, exist_ok=True)
+            ext = "html" if "html" in ct else "bin"
+            diag_path = _os.path.join(diag_dir, f"elsevier-block-{int(time.time())}.{ext}")
+            with open(diag_path, "wb") as f:
+                f.write(body)
+            print(f"   [Elsevier] Block response saved for inspection: {diag_path}")
+        except Exception:
+            pass
     except Exception as e:
         print(f"   [Elsevier] APIRequest error: {type(e).__name__}: {e}")
     return False
@@ -284,44 +296,37 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         # crasolve token), follows the redirect to pdf.sciencedirectassets.com
         # (S3 CDN, no Cloudflare), and pdf_capture.py's route interceptor
         # grabs the bytes before Chrome's PDF viewer or any extension.
-        print(f"   [Elsevier] All HTTP fetches failed — clicking PDF link with user gesture: {pdf_href[:80]}")
+        # All programmatic strategies blocked. Surface Chrome to the user with
+        # the verification page LOADED so they can solve the challenge that
+        # gates the PDF.
+        print(f"   [Elsevier] All HTTP fetches failed — escalating to user (Chrome interactive)")
+
+        # Step A: navigate Chrome directly to the pdfft URL so the verification
+        # page (CF Turnstile, etc.) renders interactively. The earlier click()
+        # approach landed on something the user couldn't see/interact with.
         try:
-            # dispatchEvent('click', {bubbles:true}) most closely mimics a
-            # human click — ScienceDirect's own JS runs and constructs a
-            # legitimate request with their token.
-            page.locator(sel).first.click(timeout=5000)
+            page.goto(pdf_href, wait_until="domcontentloaded", timeout=30_000)
         except Exception as e:
-            print(f"   [Elsevier] Click raised (may be download): {e}")
+            # Navigation interrupted by download is normal
+            print(f"   [Elsevier] Navigate to pdfft raised: {e}")
 
-        # Watch for either:
-        #  - PDF captured via the S3 CDN route hook in pdf_capture.py
-        #  - A new tab opened by ScienceDirect that we should follow
         time.sleep(3)
-        _check_reader_tabs(page, captured)
-
-        wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
-        if captured:
-            return True
-        _check_reader_tabs(page, captured)
+        # Maybe the navigation alone returned the PDF (route hook caught it)
         if captured:
             return True
 
-        # Still nothing — check if we landed on a verification page on any tab
-        all_pages = list(page.context.pages)
-        for p in all_pages:
-            try:
-                if detect_cloudflare_challenge(p) or detect_elsevier_verification(p):
-                    kind = "Cloudflare" if detect_cloudflare_challenge(p) else "Elsevier verification"
-                    print(f"   [Elsevier] {kind} page on tab {p.url[:60]} — prompting user")
-                    emit_cloudflare_alert(p)
-                    wait_for_pdf_or_user_action(captured, timeout_s=180)
-                    return bool(captured)
-            except Exception:
-                pass
-
-        # No verification page detected but no PDF either — prompt user anyway
-        print("   [Elsevier] PDF not captured after 30s — prompting user to check Chrome")
+        # Step B: prompt the user with the Chrome window in front. The popup
+        # message guides them to solve whatever's on screen (CF Turnstile, etc.)
+        # The bring_download_to_front Tauri command (triggered by the popup
+        # button) brings the Chrome window forward via Win32 SetForegroundWindow.
+        print(f"   [Elsevier] Chrome is on: {page.url[:100]}")
+        print(f"   [Elsevier] Page title: {page.title()[:80]}")
+        print(f"   [Elsevier] Prompting user to complete verification in Chrome...")
         emit_cloudflare_alert(page)
+
+        # Hold Chrome open up to 3 minutes while user solves verification.
+        # Once solved, CF/Elsevier issues the PDF response and the route hook
+        # captures it.
         wait_for_pdf_or_user_action(captured, timeout_s=180)
         return bool(captured)
 
@@ -596,5 +601,4 @@ def authenticate_elsevier(page: Page, article_url: str, email: str, password: st
 
     print(f"   [Elsevier] Post-auth page: {page.title()[:60]}")
     if not _click_pdf_and_wait(page, captured, output_dir):
-        print(f"   [Elsevier] No PDF captured — URL: {page.url[:80]}")
-        print("   [Elsevier] download.py retry loop will attempt again if needed")
+        print(f"   [Elsevier] No PDF captured — final URL: {page.url[:80]}")
