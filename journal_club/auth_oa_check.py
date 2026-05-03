@@ -80,6 +80,25 @@ def detect_cloudflare_challenge(page: Page) -> bool:
     return False
 
 
+def detect_elsevier_verification(page: Page) -> bool:
+    """Detect Elsevier's 'Request Verification: In Progress' bot-block page."""
+    try:
+        title = (page.title() or "").lower()
+        if "verification" in title or "request verification" in title:
+            return True
+    except Exception:
+        pass
+    try:
+        # Look for the heading or body text that identifies the page
+        if page.locator("h1:has-text('Request Verification')").count() > 0:
+            return True
+        if page.locator("text=Request Verification: In Progress").count() > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
     try:
         page.wait_for_function(
@@ -90,6 +109,18 @@ def wait_for_cf_clear(page: Page, timeout_ms: int = 90_000) -> bool:
         return True
     except Exception:
         return False
+
+
+def wait_for_pdf_or_user_action(captured: list, timeout_s: int = 180) -> bool:
+    """Poll until PDF is captured or timeout. Used when waiting for user to
+    complete verification in Chrome. Keeps the browser session alive."""
+    import time
+    start = time.time()
+    while time.time() - start < timeout_s:
+        if captured:
+            return True
+        time.sleep(2)
+    return bool(captured)
 
 
 def _try_wiley_pdfdirect(page: Page, context: BrowserContext, captured: list) -> bool:

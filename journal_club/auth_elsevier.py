@@ -3,7 +3,10 @@ import time
 from urllib.parse import quote
 from playwright.sync_api import Page
 
-from journal_club.auth_oa_check import detect_cloudflare_challenge, emit_cloudflare_alert, wait_for_cf_clear
+from journal_club.auth_oa_check import (
+    detect_cloudflare_challenge, detect_elsevier_verification,
+    emit_cloudflare_alert, wait_for_cf_clear, wait_for_pdf_or_user_action,
+)
 from journal_club.huji_login import wait_for_huji_and_login, dismiss_cookies
 
 _HUJI_ENTITY_ID = "https://idp.huji.ac.il/idp/shibboleth"
@@ -149,19 +152,24 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         except Exception as e:
             print(f"   [Elsevier] Click raised (may be download): {e}")
 
-        time.sleep(2)
-        if detect_cloudflare_challenge(page):
+        time.sleep(3)
+
+        # Detect any verification page (CF or Elsevier) and prompt user
+        if detect_cloudflare_challenge(page) or detect_elsevier_verification(page):
+            kind = "Cloudflare" if detect_cloudflare_challenge(page) else "Elsevier verification"
+            print(f"   [Elsevier] {kind} page — prompting user (Chrome stays open)")
             emit_cloudflare_alert(page)
-            wait_for_cf_clear(page)
-            wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+            # Hold Chrome open for up to 3 min while user solves verification.
+            # Polling captured directly — no early exit on title/iframe heuristics.
+            wait_for_pdf_or_user_action(captured, timeout_s=180)
             return bool(captured)
 
+        # No verification page detected — short wait for natural PDF capture
         wait_for_pdf(captured, timeout_s=15, output_dir=output_dir)
         if not captured:
-            print("   [Elsevier] PDF not captured — prompting user to check Chrome")
+            print("   [Elsevier] PDF not captured after 15s — prompting user to check Chrome")
             emit_cloudflare_alert(page)
-            wait_for_cf_clear(page, timeout_ms=120_000)
-            wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
+            wait_for_pdf_or_user_action(captured, timeout_s=180)
         return bool(captured)
 
     # No pdfft href found — click and let Chrome handle it
