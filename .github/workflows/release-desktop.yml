@@ -61,9 +61,11 @@ jobs:
 
       - name: Rename sidecar to Tauri target triple
         run: |
-          Rename-Item `
+          # Move-Item -Force overwrites the prebuilt binary committed to the
+          # repo. Plain Rename-Item errors with "file already exists".
+          Move-Item -Force `
             desktop/src-tauri/binaries/jc-download.exe `
-            jc-download-x86_64-pc-windows-msvc.exe
+            desktop/src-tauri/binaries/jc-download-x86_64-pc-windows-msvc.exe
 
       - name: Install frontend dependencies
         run: pnpm install
