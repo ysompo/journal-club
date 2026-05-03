@@ -52,6 +52,10 @@ _CLONE_IGNORE = {
     "Crashpad", "BrowserMetrics", "Storage",
     "Sessions",
     "Current Tabs", "Current Session", "Last Tabs", "Last Session",
+    # Extensions hijack PDF downloads (Adobe Acrobat etc) — never clone them
+    "Extensions", "Extension Rules", "Extension Scripts", "Extension State",
+    "Local Extension Settings", "Managed Extension Settings",
+    "Sync Extension Settings",
 }
 
 
@@ -363,6 +367,16 @@ def _spawn_chrome_with_cdp(chrome_path: str, profile_dir: str, port: int,
         "--disable-popup-blocking",
         "--disable-translate",
         "--restore-last-session=false",
+        # Disable all extensions — third-party extensions (Adobe Acrobat,
+        # Endnote Click, Kopernio, ad blockers) intercept PDF downloads
+        # and replace the page with their own UI, breaking the flow.
+        "--disable-extensions",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-extensions-http-throttling",
+        # Block any extension install attempts (Web Store, sync, enterprise)
+        "--disable-extensions-except=",
+        "--disable-default-apps",
+        "--disable-sync",
         "about:blank",
     ]
     creationflags = 0
