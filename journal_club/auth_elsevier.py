@@ -102,6 +102,15 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
             print(f"   [Elsevier] Page looks like hard-block, not real article")
         return False
 
+    # Capture pre-click state for diagnostics
+    try:
+        href_before = _get_pdf_href(page, sel)
+    except Exception:
+        href_before = "(unreadable)"
+    tabs_before = len(page.context.pages)
+    url_before = page.url
+    print(f"   [Elsevier] Pre-click: {tabs_before} tab(s), pdf href={href_before[:80] if href_before else None!r}")
+
     try:
         page.click(sel, timeout=5000)
         print(f"   [Elsevier] Clicked PDF button: {sel}")
@@ -109,11 +118,19 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         print(f"   [Elsevier] PDF click failed ({sel}): {e}")
         return False
 
+    # Diagnostics: did the click do ANYTHING?
+    time.sleep(3)
+    tabs_after = len(page.context.pages)
+    try:
+        url_after = page.url
+    except Exception:
+        url_after = "(unreadable)"
+    print(f"   [Elsevier] Post-click +3s: {tabs_after} tab(s), main page url={'changed' if url_after != url_before else 'unchanged'} ({url_after[:80]})")
+
     # Wait for capture via:
     #  - direct PDF response intercepted by pdf_capture hooks (route hook on
     #    pdf.sciencedirectassets.com fires when Chrome follows the redirect), or
     #  - reader tab opened by ScienceDirect that we follow.
-    time.sleep(3)
     _check_reader_tabs(page, captured)
     if not captured:
         wait_for_pdf(captured, timeout_s=45, output_dir=output_dir)
@@ -139,32 +156,62 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
 
 
 def _check_reader_tabs(page: Page, captured: list) -> None:
-    """Check any open Elsevier Reader / PDF tabs and click their Download button."""
-    for p in page.context.pages:
-        if p == page or captured:
+    """Check any open tabs other than the article page for PDF or challenge content."""
+    other_tabs = [p for p in page.context.pages if p != page]
+    if not other_tabs:
+        return
+    print(f"   [Elsevier] {len(other_tabs)} other tab(s) open:")
+    for p in other_tabs:
+        try:
+            t_url = p.url
+        except Exception:
+            t_url = "(unreadable)"
+        try:
+            t_title = p.title()
+        except Exception:
+            t_title = "(unreadable)"
+        print(f"   [Elsevier]   - title={t_title[:50]!r} url={t_url[:80]!r}")
+
+    for p in other_tabs:
+        if captured:
+            return
+        try:
+            purl = p.url
+        except Exception:
             continue
-        purl = p.url
-        if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
-                                    'showpdf', 'pdfft', '/pdf/')):
-            print(f"   [Elsevier] Reader/PDF tab: {purl[:80]}")
-            try:
-                p.wait_for_load_state("domcontentloaded", timeout=8000)
-            except Exception:
-                pass
-            # CF challenge can appear on the PDF/reader tab itself
+        try:
+            p.wait_for_load_state("domcontentloaded", timeout=8000)
+        except Exception:
+            pass
+
+        # CF challenge / Elsevier hardblock can land on the new tab
+        try:
             if detect_cloudflare_challenge(p):
-                print("   [Elsevier] Cloudflare challenge on PDF tab — alerting user")
+                print(f"   [Elsevier] Cloudflare challenge on tab {purl[:60]!r} — alerting user")
                 emit_cloudflare_alert(p)
                 wait_for_cf_clear(p)
-            if captured:
-                return
+                if captured:
+                    return
+        except Exception:
+            pass
+        try:
+            if detect_elsevier_hardblock(p):
+                print(f"   [Elsevier] Hardblock on tab {purl[:60]!r}")
+                continue
+        except Exception:
+            pass
+
+        # If the tab is on a Reader / PDF URL, try clicking the embedded
+        # download button (in case Chrome's PDF viewer is showing it inline).
+        if any(x in purl for x in ('reader.elsevier.com', 'sciencedirectassets',
+                                    'showpdf', 'pdfft', '/pdf/')):
             for dl_sel in [
                 "a[href*='pdfft']", "a[href*='showPdf']",
                 "button[aria-label='Download PDF']", "button[title='Download']",
                 "button:has-text('Download')", "a:has-text('Download')", "#download-btn",
             ]:
                 try:
-                    p.click(dl_sel, timeout=5000)
+                    p.click(dl_sel, timeout=3000)
                     print(f"   [Elsevier] Clicked reader download: {dl_sel}")
                     break
                 except Exception:
