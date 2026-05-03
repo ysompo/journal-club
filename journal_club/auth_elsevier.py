@@ -141,15 +141,63 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
     if captured:
         return True
 
-    # Last resort: if Chrome ended on a CF/Elsevier challenge page, prompt user.
+    # ─── Diagnostic dump of every tab's state ────────────────────────────────
+    # We've timed out without any PDF. Dump the visible state of every tab
+    # (HTML + screenshot) so we can SEE what each page is showing instead of
+    # guessing from URLs alone. This is essential when CF runs an invisible
+    # JS challenge that hangs without a detectable widget.
     try:
-        if detect_cloudflare_challenge(page) or detect_elsevier_verification(page):
-            kind = "Cloudflare" if detect_cloudflare_challenge(page) else "Elsevier verification"
-            print(f"   [Elsevier] {kind} page detected — prompting user")
-            emit_cloudflare_alert(page)
-            wait_for_pdf_or_user_action(captured, timeout_s=180)
-    except Exception:
-        pass
+        import tempfile, os as _os
+        diag_dir = _os.path.join(tempfile.gettempdir(), "jc_downloads", "diag")
+        _os.makedirs(diag_dir, exist_ok=True)
+        ts = int(time.time())
+        for idx, p in enumerate(page.context.pages):
+            try:
+                p_url = p.url
+            except Exception:
+                p_url = "(unreadable)"
+            try:
+                p_title = p.title()
+            except Exception:
+                p_title = "(unreadable)"
+            label = "main" if p == page else f"tab{idx}"
+            print(f"   [Elsevier] Tab dump {label}: title={p_title[:60]!r} url={p_url[:100]!r}")
+            try:
+                html_path = _os.path.join(diag_dir, f"stuck-{ts}-{label}.html")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(p.content())
+                print(f"   [Elsevier]   HTML dumped: {html_path}")
+            except Exception as e:
+                print(f"   [Elsevier]   HTML dump failed: {e}")
+            try:
+                png_path = _os.path.join(diag_dir, f"stuck-{ts}-{label}.png")
+                p.screenshot(path=png_path, full_page=False, timeout=10_000)
+                print(f"   [Elsevier]   Screenshot: {png_path}")
+            except Exception as e:
+                print(f"   [Elsevier]   Screenshot failed: {e}")
+    except Exception as e:
+        print(f"   [Elsevier] Diagnostic dump failed: {e}")
+
+    # Last resort: if Chrome ended on a CF/Elsevier challenge page, prompt user.
+    # Check on EVERY tab, not just the original page, since CF challenges
+    # often appear on the new tab opened by the click.
+    challenge_page = None
+    for p in page.context.pages:
+        try:
+            if detect_cloudflare_challenge(p) or detect_elsevier_verification(p):
+                challenge_page = p
+                break
+        except Exception:
+            continue
+    if challenge_page is not None:
+        kind = "Cloudflare" if detect_cloudflare_challenge(challenge_page) else "Elsevier verification"
+        try:
+            cu = challenge_page.url[:80]
+        except Exception:
+            cu = "(unreadable)"
+        print(f"   [Elsevier] {kind} page detected on tab {cu!r} — prompting user")
+        emit_cloudflare_alert(challenge_page)
+        wait_for_pdf_or_user_action(captured, timeout_s=180)
 
     return bool(captured)
 
