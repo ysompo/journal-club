@@ -65,8 +65,59 @@ def _get_pdf_href(page: Page, sel: str) -> str | None:
     return None
 
 
+def _fetch_pdf_via_js(page: Page, pdf_href: str, captured: list) -> bool:
+    """Download PDF via in-page fetch() — bypasses Elsevier bot detection.
+
+    Running fetch() from within the page's JS context means the server sees a
+    normal same-origin XHR with all existing session cookies and the article
+    page as Referer. No CDP navigation fingerprint, no automation signals.
+    """
+    import base64
+    print(f"   [Elsevier] Trying in-page fetch() for PDF...")
+    try:
+        result = page.evaluate(
+            """
+            async (url) => {
+                try {
+                    const r = await fetch(url, { credentials: 'include' });
+                    const ct = r.headers.get('content-type') || '';
+                    if (!r.ok || !ct.toLowerCase().includes('pdf')) {
+                        return { ok: false, status: r.status, ct: ct };
+                    }
+                    const blob = await r.blob();
+                    return await new Promise(resolve => {
+                        const fr = new FileReader();
+                        fr.onloadend = () => resolve({
+                            ok: true,
+                            data: fr.result.split(',')[1]
+                        });
+                        fr.onerror = () => resolve({ ok: false, error: 'FileReader error' });
+                        fr.readAsDataURL(blob);
+                    });
+                } catch(e) {
+                    return { ok: false, error: e.message };
+                }
+            }
+            """,
+            pdf_href,
+            timeout=90_000,
+        )
+        if result and result.get("ok") and result.get("data"):
+            pdf_bytes = base64.b64decode(result["data"])
+            if len(pdf_bytes) > 10_000:
+                print(f"   [Elsevier] ✓ fetch() PDF: {len(pdf_bytes):,} bytes")
+                captured.append(pdf_bytes)
+                return True
+            print(f"   [Elsevier] fetch() response too small ({len(pdf_bytes)} bytes) — not PDF")
+        else:
+            print(f"   [Elsevier] fetch() not PDF: {result}")
+    except Exception as e:
+        print(f"   [Elsevier] fetch() error: {e}")
+    return False
+
+
 def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> bool:
-    """Navigate the main page to the PDF URL (avoids CF blocking new tabs)."""
+    """Download the PDF: try in-page fetch() first, fall back to click."""
     from journal_club.pdf_capture import wait_for_pdf
 
     sel = _pdf_button(page)
@@ -74,22 +125,18 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
         print("   [Elsevier] No PDF button found on page")
         return False
 
-    # Extract the PDF URL first so we can navigate the main page to it directly.
-    # Opening pdfft URLs in a new tab gets hard-blocked by Cloudflare because the
-    # new tab has no warm session. The main page already has auth cookies + CF standing.
     pdf_href = _get_pdf_href(page, sel)
     if pdf_href and any(x in pdf_href for x in ('pdfft', 'showPdf', '/doi/pdf')):
-        # Keep navigation in the main page so the Referer header is the article URL.
-        # ScienceDirect's PDF button may use window.open() rather than <a target="_blank">,
-        # so we override both: remove target attributes AND redirect window.open to
-        # window.location so no second tab opens.
-        print(f"   [Elsevier] Clicking PDF link in-page (intercept window.open): {pdf_href[:80]}")
+        # Primary: in-page fetch() — no navigation, no automation fingerprint
+        if _fetch_pdf_via_js(page, pdf_href, captured):
+            return True
+
+        # Fallback: click with window.open intercepted so no second tab opens
+        print(f"   [Elsevier] fetch() failed — falling back to click")
         try:
             page.evaluate("""
                 () => {
-                    // Redirect any window.open call to the current tab
                     window.open = (url) => { if (url) window.location.href = url; };
-                    // Also strip target="_blank" in case it's a plain link
                     document.querySelectorAll(
                         'a[href*="pdfft"], a[href*="showPdf"], a[href*="/doi/pdf"]'
                     ).forEach(el => el.removeAttribute('target'));
@@ -99,33 +146,25 @@ def _click_pdf_and_wait(page: Page, captured: list, output_dir: str | None) -> b
             pass
         try:
             page.click(sel, timeout=5000)
-            print(f"   [Elsevier] Clicked PDF link: {sel}")
         except Exception as e:
-            # Navigation-triggered clicks raise when Chrome intercepts the download
             print(f"   [Elsevier] Click raised (may be download): {e}")
 
-        # Check for a visible CF or Elsevier verification page
         time.sleep(2)
         if detect_cloudflare_challenge(page):
-            print("   [Elsevier] CF challenge after PDF click — alerting user")
             emit_cloudflare_alert(page)
             wait_for_cf_clear(page)
             wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
             return bool(captured)
 
-        # Short wait — clean PDF download fires capture immediately
         wait_for_pdf(captured, timeout_s=15, output_dir=output_dir)
-
         if not captured:
-            # Elsevier verification page or invisible CF — bring Chrome to front
-            print("   [Elsevier] PDF not captured after 15s — prompting user to check Chrome")
+            print("   [Elsevier] PDF not captured — prompting user to check Chrome")
             emit_cloudflare_alert(page)
             wait_for_cf_clear(page, timeout_ms=120_000)
             wait_for_pdf(captured, timeout_s=30, output_dir=output_dir)
-
         return bool(captured)
 
-    # Fallback: click the button (may open new tab or trigger download directly)
+    # No pdfft href found — click and let Chrome handle it
     try:
         page.click(sel, timeout=5000)
         print(f"   [Elsevier] Clicked PDF button: {sel}")
