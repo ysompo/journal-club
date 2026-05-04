@@ -106,26 +106,27 @@ def _ensure_chromium(browsers_dir: str) -> None:
 
     _emit({"type": "progress", "message": "First-time setup: downloading browser (~170 MB)…"})
 
-    # Invoke the bundled Playwright node driver directly. This avoids reliance
-    # on a ``playwright`` CLI on PATH and works inside a PyInstaller one-file
-    # bundle where ``python -m playwright`` is not available.
-    try:
-        from playwright._impl._driver import compute_driver_executable, get_driver_env
-    except ImportError as e:
-        # Private API moved/renamed in a future Playwright release. Surface a
-        # clear error with the version so we can diagnose quickly.
-        try:
-            import playwright as _pw
-            ver = getattr(_pw, "__version__", "unknown")
-        except Exception:
-            ver = "unknown"
+    # Invoke the bundled Playwright node driver directly. Paths are derived
+    # from playwright.__file__ so they resolve correctly inside a PyInstaller
+    # one-file bundle (_MEIPASS) without relying on private internal APIs that
+    # can change between playwright releases.
+    import playwright as _pw_pkg
+    _pw_root = Path(_pw_pkg.__file__).parent
+    _node = _pw_root / "driver" / ("node.exe" if sys.platform == "win32" else "node")
+    _cli  = _pw_root / "driver" / "package" / "cli.js"
+
+    if not _node.exists():
         raise RuntimeError(
-            f"Playwright internal driver API missing (version={ver}): {e}. "
+            f"Playwright bundled Node not found at {str(_node)!r}. "
             f"Reinstall the app."
         )
-    driver_executable, driver_cli = compute_driver_executable()
-    env = get_driver_env()
-    env["PLAYWRIGHT_BROWSERS_PATH"] = browsers_dir
+    if not _cli.exists():
+        raise RuntimeError(
+            f"Playwright CLI not found at {str(_cli)!r}. "
+            f"Reinstall the app."
+        )
+
+    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": browsers_dir}
 
     # IMPORTANT: never use ``capture_output=True`` here. The install downloads
     # ~170 MB and the node driver can write verbose progress to stderr; a
@@ -134,7 +135,7 @@ def _ensure_chromium(browsers_dir: str) -> None:
     with tempfile.TemporaryFile(mode="w+") as stderr_f:
         try:
             proc = subprocess.run(
-                [driver_executable, *driver_cli, "install", "chromium"],
+                [str(_node), str(_cli), "install", "chromium"],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_f,
