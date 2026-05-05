@@ -1,5 +1,6 @@
 # journal_club/browser.py
 import os
+import sys
 import json
 import logging
 import subprocess
@@ -166,12 +167,13 @@ def _ensure_pdf_download_preference(profile_dir: str) -> None:
     prefs_path = os.path.join(profile_dir, "Default", "Preferences")
     try:
         os.makedirs(os.path.dirname(prefs_path), exist_ok=True)
-        username = os.environ.get("USERNAME", "Users")
-        default_dir = os.path.dirname(prefs_path)
-        subprocess.run(
-            ["icacls", default_dir, "/grant", f"{username}:(F)", "/T", "/Q"],
-            capture_output=True, timeout=10,
-        )
+        if sys.platform == "win32":
+            username = os.environ.get("USERNAME", "Users")
+            default_dir = os.path.dirname(prefs_path)
+            subprocess.run(
+                ["icacls", default_dir, "/grant", f"{username}:(F)", "/T", "/Q"],
+                capture_output=True, timeout=10,
+            )
         if os.path.exists(prefs_path):
             import stat
             os.chmod(prefs_path, stat.S_IREAD | stat.S_IWRITE)
@@ -207,30 +209,29 @@ def set_download_behavior(context: BrowserContext, page: Page,
 
 
 def _kill_chrome_with_profile(profile_dir: str) -> None:
-    """Kill Chrome process trees that are using profile_dir.
-
-    Finds parent chrome.exe processes whose command line contains the profile
-    directory name, then uses `taskkill /F /T` to terminate each one along
-    with all its children (renderer, GPU, utility processes — these don't have
-    the profile path in their own command lines so PowerShell alone misses them).
-    """
+    """Kill Chrome process trees that are using profile_dir."""
     profile_name = os.path.basename(os.path.normpath(profile_dir))
     try:
-        # Find parent Chrome PIDs by profile name, then kill each process tree
-        ps_cmd = (
-            f"$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" "
-            f"| Where-Object {{$_.CommandLine -like '*{profile_name}*'}}).ProcessId; "
-            f"if ($pids) {{"
-            f"  $pids | ForEach-Object {{ "
-            f"    & taskkill /F /T /PID $_ 2>$null "
-            f"  }}; "
-            f"  Start-Sleep -Milliseconds 1200 "
-            f"}}"
-        )
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-            capture_output=True, timeout=15,
-        )
+        if sys.platform == "win32":
+            ps_cmd = (
+                f"$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" "
+                f"| Where-Object {{$_.CommandLine -like '*{profile_name}*'}}).ProcessId; "
+                f"if ($pids) {{"
+                f"  $pids | ForEach-Object {{ "
+                f"    & taskkill /F /T /PID $_ 2>$null "
+                f"  }}; "
+                f"  Start-Sleep -Milliseconds 1200 "
+                f"}}"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True, timeout=15,
+            )
+        else:
+            subprocess.run(
+                ["pkill", "-9", "-f", profile_name],
+                capture_output=True, timeout=10,
+            )
         logger.info(f"[Browser] Killed any stale Chrome process trees for '{profile_name}'")
     except Exception as e:
         logger.debug(f"[Browser] Could not kill stale Chrome processes: {e}")
@@ -241,9 +242,9 @@ def _cleanup_chromium_locks(profile_dir: str) -> None:
     _kill_chrome_with_profile(profile_dir)
 
     # Grant current user full control of Default/ so LOCK is deletable.
-    # Chrome sets restrictive ACLs on its lock file that survive process death.
+    # Chrome sets restrictive ACLs on its lock file that survive process death (Windows only).
     default_dir = os.path.join(profile_dir, "Default")
-    if os.path.exists(default_dir):
+    if sys.platform == "win32" and os.path.exists(default_dir):
         try:
             username = os.environ.get("USERNAME") or os.environ.get("USER") or "Users"
             subprocess.run(
@@ -281,7 +282,12 @@ def _seed_profile_from_real_chrome(active_profile: str) -> None:
     if os.path.exists(marker):
         return  # already seeded
 
-    real_root = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data")
+    if sys.platform == "win32":
+        real_root = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data")
+    elif sys.platform == "darwin":
+        real_root = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+    else:
+        real_root = os.path.expanduser("~/.config/google-chrome")
     if not os.path.isdir(real_root):
         logger.info(f"[Browser] No real Chrome profile found at {real_root}, skipping seed")
         return
@@ -430,8 +436,13 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
         if profile_dir:
             master_profile = profile_dir
         else:
-            local_appdata = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-            master_profile = os.path.join(local_appdata, "JournalClub", "chrome-profile")
+            if sys.platform == "win32":
+                base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+            elif sys.platform == "darwin":
+                base = os.path.expanduser("~/Library/Application Support")
+            else:
+                base = os.path.expanduser("~/.local/share")
+            master_profile = os.path.join(base, "JournalClub", "chrome-profile")
         os.makedirs(master_profile, exist_ok=True)
 
         # Clone the master profile to a per-job temp dir so concurrent
@@ -547,12 +558,14 @@ def launch_browser(profile_dir: str, chrome_path: str = "", port: int = 0,
     finally:
         if chrome_proc is not None:
             try:
-                # taskkill /F /T kills the full process tree (renderer, GPU, utility).
-                # terminate() only sends SIGTERM to the parent and orphans children on Windows.
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(chrome_proc.pid)],
-                    capture_output=True, timeout=10,
-                )
+                if sys.platform == "win32":
+                    # taskkill /F /T kills the full process tree (renderer, GPU, utility).
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(chrome_proc.pid)],
+                        capture_output=True, timeout=10,
+                    )
+                else:
+                    chrome_proc.kill()
             except Exception:
                 try:
                     chrome_proc.kill()

@@ -21,64 +21,86 @@ fn chrome_profiles() -> &'static Mutex<HashMap<String, String>> {
 }
 
 fn kill_chrome_pid(pid: u32) {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .output();
+    if cfg!(target_os = "windows") {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+    } else {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output();
+    }
 }
 
-/// Kill all chrome.exe processes whose command line contains the profile directory name.
+/// Kill all Chrome processes whose command line contains the profile directory name.
 /// More robust than PID-based kill for Chrome's multi-process architecture.
 fn kill_chrome_profile(profile: &str) {
     let profile_name = std::path::Path::new(profile)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(profile);
-    let ps_cmd = format!(
-        "$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" \
-         | Where-Object {{$_.CommandLine -like '*{}*'}}).ProcessId; \
-         if ($pids) {{ $pids | ForEach-Object {{ & taskkill /F /T /PID $_ 2>$null }}; \
-         Start-Sleep -Milliseconds 800 }}",
-        profile_name.replace('\'', "\\'")
-    );
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
-        .output();
+    if cfg!(target_os = "windows") {
+        let ps_cmd = format!(
+            "$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" \
+             | Where-Object {{$_.CommandLine -like '*{}*'}}).ProcessId; \
+             if ($pids) {{ $pids | ForEach-Object {{ & taskkill /F /T /PID $_ 2>$null }}; \
+             Start-Sleep -Milliseconds 800 }}",
+            profile_name.replace('\'', "\\'")
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+            .output();
+    } else {
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "-f", profile_name])
+            .output();
+    }
 }
 
-/// Kill all chrome.exe processes whose command line contains "jc-chrome-job-".
+/// Kill all Chrome processes whose command line contains "jc-chrome-job-".
 /// Handles the case where cancel arrives before chrome_pid JSON is emitted so
 /// neither chrome_pids nor chrome_profiles maps have an entry yet.
 fn kill_all_jc_chrome_sessions() {
-    let ps_cmd = "$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" \
-        | Where-Object {$_.CommandLine -like '*jc-chrome-job-*'}).ProcessId; \
-        if ($pids) { $pids | ForEach-Object { & taskkill /F /T /PID $_ 2>$null }; \
-        Start-Sleep -Milliseconds 500 }";
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd])
-        .output();
+    if cfg!(target_os = "windows") {
+        let ps_cmd = "$pids = (Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" \
+            | Where-Object {$_.CommandLine -like '*jc-chrome-job-*'}).ProcessId; \
+            if ($pids) { $pids | ForEach-Object { & taskkill /F /T /PID $_ 2>$null }; \
+            Start-Sleep -Milliseconds 500 }";
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd])
+            .output();
+    } else {
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "-f", "jc-chrome-job-"])
+            .output();
+    }
 }
 
-/// Bring Chrome window to the foreground using Win32 SetForegroundWindow via PowerShell.
+/// Bring Chrome window to the foreground.
+/// On Windows: uses Win32 SetForegroundWindow via PowerShell.
+/// On macOS: no-op — focus management is not needed for the headless download flow.
 fn bring_chrome_to_front(pid: u32) {
-    let ps_cmd = format!(
-        "Add-Type -TypeDefinition @'\n\
-         using System;\n\
-         using System.Runtime.InteropServices;\n\
-         public class WinHelper {{\n\
-           [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);\n\
-           [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int n);\n\
-         }}\n\
-         '@ -Language CSharp;\n\
-         $p = Get-Process -Id {} -ErrorAction SilentlyContinue;\n\
-         if ($p -and $p.MainWindowHandle -ne 0) {{\n\
-           [WinHelper]::ShowWindow($p.MainWindowHandle, 9);\n\
-           [WinHelper]::SetForegroundWindow($p.MainWindowHandle);\n\
-         }}",
-        pid
-    );
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
-        .spawn(); // fire-and-forget
+    if cfg!(target_os = "windows") {
+        let ps_cmd = format!(
+            "Add-Type -TypeDefinition @'\n\
+             using System;\n\
+             using System.Runtime.InteropServices;\n\
+             public class WinHelper {{\n\
+               [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);\n\
+               [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int n);\n\
+             }}\n\
+             '@ -Language CSharp;\n\
+             $p = Get-Process -Id {} -ErrorAction SilentlyContinue;\n\
+             if ($p -and $p.MainWindowHandle -ne 0) {{\n\
+               [WinHelper]::ShowWindow($p.MainWindowHandle, 9);\n\
+               [WinHelper]::SetForegroundWindow($p.MainWindowHandle);\n\
+             }}",
+            pid
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+            .spawn(); // fire-and-forget
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]

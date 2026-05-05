@@ -1,5 +1,10 @@
 # Journal Club App — Development Guide
 
+## Session Focus
+**This session targets the macOS (darwin) version only.** All changes must work correctly on Mac. Windows-only code paths (`taskkill`, `powershell`, `icacls`, `%LOCALAPPDATA%`) should be preserved but not extended — add `sys.platform == "win32"` or `cfg!(target_os = "windows")` guards instead.
+
+---
+
 ## Overview
 
 A Flask web app for curating, downloading, and sharing academic journal articles. Users follow journals, view table-of-contents (TOC), download PDFs, manage a reading list, and email selected articles via Resend.
