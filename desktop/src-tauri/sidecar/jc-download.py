@@ -33,6 +33,7 @@ import os
 import subprocess
 import tempfile
 import traceback
+from pathlib import Path
 
 # Disable Python output buffering as early as possible so a killed sidecar
 # leaves a complete log up to the last printed line.
