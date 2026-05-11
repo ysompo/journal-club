@@ -177,6 +177,22 @@ jobs:
           codesign --force --deep --sign - \
             "desktop/src-tauri/target/release/bundle/macos/Journal Club.app"
 
+      - name: Re-package updater artifact from signed app
+        run: |
+          BUNDLE_DIR="desktop/src-tauri/target/release/bundle/macos"
+          rm -f "$BUNDLE_DIR/Journal Club.app.tar.gz" "$BUNDLE_DIR/Journal Club.app.tar.gz.sig"
+          tar -czf "$BUNDLE_DIR/Journal Club.app.tar.gz" -C "$BUNDLE_DIR" "Journal Club.app"
+
+      - name: Re-sign updater artifact
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd desktop
+          pnpm tauri signer sign \
+            -f "$RUNNER_TEMP/tauri.key" \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "src-tauri/target/release/bundle/macos/Journal Club.app.tar.gz"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
