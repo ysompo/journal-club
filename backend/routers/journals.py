@@ -6,8 +6,10 @@ from xml.etree import ElementTree
 
 
 def _strip_html(text: str) -> str:
-    text = re.sub(r'<[^>]+>', '', text)
-    return html.unescape(text).strip()
+    text = html.unescape(text)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
 
 from database import get_db
 from routers.users import get_current_user
@@ -41,17 +43,31 @@ def _cache_fresh(key: tuple) -> list | None:
     return articles
 
 
-async def _epmc_search(query: str) -> list[dict]:
+async def _epmc_search(query: str, max_results: int = 100) -> list[dict]:
+    all_results: list[dict] = []
+    cursor = "*"
+    page_size = min(max_results, 1000)
     async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.get(EPMC_SEARCH, params={
-            "query": query,
-            "format": "json",
-            "resultType": "core",
-            "pageSize": 100,
-            "sort": "FIRST_PDATE_D desc",
-        })
-        r.raise_for_status()
-        return r.json().get("resultList", {}).get("result", [])
+        while len(all_results) < max_results:
+            r = await client.get(EPMC_SEARCH, params={
+                "query": query,
+                "format": "json",
+                "resultType": "core",
+                "pageSize": page_size,
+                "sort": "FIRST_PDATE_D desc",
+                "cursorMark": cursor,
+            })
+            r.raise_for_status()
+            data = r.json()
+            results = data.get("resultList", {}).get("result", [])
+            if not results:
+                break
+            all_results.extend(results)
+            next_cursor = data.get("nextCursorMark")
+            if not next_cursor or next_cursor == cursor:
+                break
+            cursor = next_cursor
+    return all_results[:max_results]
 
 
 async def _fetch_pubmed_toc(issn: str, months: int, abbreviation: str = "") -> list[dict]:
@@ -59,9 +75,10 @@ async def _fetch_pubmed_toc(issn: str, months: int, abbreviation: str = "") -> l
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     date_filter = f'FIRST_PDATE:[{since} TO {today}]'
 
-    results = await _epmc_search(f'ISSN:"{issn}" AND {date_filter}')
+    max_results = {1: 100, 3: 300, 6: 500, 12: 1000}.get(months, 100)
+    results = await _epmc_search(f'ISSN:"{issn}" AND {date_filter}', max_results)
     if not results and abbreviation:
-        results = await _epmc_search(f'JOURNAL:"{abbreviation}" AND {date_filter}')
+        results = await _epmc_search(f'JOURNAL:"{abbreviation}" AND {date_filter}', max_results)
 
     articles = []
     for r in results:

@@ -24,6 +24,10 @@ interface JournalState {
   excludedSubspecialties?: Set<Subspecialty>;
 }
 
+function stripXmlTags(text: string): string {
+  return text.replace(/<[^>]+>/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
 type Subspecialty = "Obstetrics" | "Onco-gynecology" | "Fertility" | "Ultrasound" | "Gynecology" | "Other";
 
 const SUBSPECIALTY_ORDER: Subspecialty[] = ["Obstetrics", "Gynecology", "Onco-gynecology", "Fertility", "Ultrasound", "Other"];
@@ -455,14 +459,8 @@ export function JournalsPage({ api, isDesktop = false, openPdfExternal, refreshK
   const currentScope = currentState?.scope ?? 1;
 
   const typeOf = (a: TocArticle) => a.article_type ?? "Other";
-  const typeCounts = currentToc.reduce<Record<string, number>>((acc, a) => {
-    const t = typeOf(a); acc[t] = (acc[t] ?? 0) + 1; return acc;
-  }, {});
-  const availableTypes = Object.keys(typeCounts).sort();
   const excludedTypes = (selectedId && journalStates[selectedId]?.excludedTypes) || new Set<string>();
 
-  // Subspecialty classification — articles can belong to multiple subspecialties
-  // (e.g. "ovarian cancer in pregnancy" → Onco-gynecology + Obstetrics).
   const subspecialtyByKey = (() => {
     const m = new Map<string, Set<Subspecialty>>();
     currentToc.forEach(a => {
@@ -473,20 +471,31 @@ export function JournalsPage({ api, isDesktop = false, openPdfExternal, refreshK
   })();
   const subspecsOf = (a: TocArticle): Set<Subspecialty> =>
     subspecialtyByKey.get(a.pmid ?? a.doi ?? a.url ?? a.title) ?? new Set(["Other"]);
+  const excludedSubspecs = (selectedId && journalStates[selectedId]?.excludedSubspecialties) || new Set<Subspecialty>();
 
-  const subspecCounts = currentToc.reduce<Record<string, number>>((acc, a) => {
+  const passesSubspec = (a: TocArticle) => {
+    const labels = subspecsOf(a);
+    for (const s of labels) if (!excludedSubspecs.has(s)) return true;
+    return false;
+  };
+
+  // Cross-filter: type counts reflect subspecialty filter, subspecialty counts reflect type filter
+  const subspecFiltered = currentToc.filter(passesSubspec);
+  const typeCounts = subspecFiltered.reduce<Record<string, number>>((acc, a) => {
+    const t = typeOf(a); acc[t] = (acc[t] ?? 0) + 1; return acc;
+  }, {});
+  const availableTypes = Object.keys(typeCounts).sort();
+
+  const typeFiltered = currentToc.filter(a => !excludedTypes.has(typeOf(a)));
+  const subspecCounts = typeFiltered.reduce<Record<string, number>>((acc, a) => {
     subspecsOf(a).forEach(s => { acc[s] = (acc[s] ?? 0) + 1; });
     return acc;
   }, {});
   const availableSubspecs = SUBSPECIALTY_ORDER.filter(s => (subspecCounts[s] ?? 0) > 0);
-  const excludedSubspecs = (selectedId && journalStates[selectedId]?.excludedSubspecialties) || new Set<Subspecialty>();
 
-  // Show article if at least one of its subspecialties is NOT excluded.
   const filteredToc = currentToc.filter(a => {
     if (excludedTypes.has(typeOf(a))) return false;
-    const labels = subspecsOf(a);
-    for (const s of labels) if (!excludedSubspecs.has(s)) return true;
-    return false;
+    return passesSubspec(a);
   });
 
   const toggleType = (t: string) => {
@@ -845,7 +854,7 @@ function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDo
             onClick={() => setExpanded(e => !e)}
             style={{ fontFamily: "'Playfair Display', Georgia, serif", fontWeight: 600, fontSize: "0.9rem", color: "var(--color-text-primary, #1A2332)", cursor: "pointer", lineHeight: 1.45 }}
           >
-            {article.title}
+            {stripXmlTags(article.title)}
           </div>
           <div style={{ fontSize: "0.765rem", color: "var(--color-text-secondary, #5A6475)", marginTop: "0.2rem", fontFamily: "'DM Sans', sans-serif" }}>
             {article.authors.slice(0, 3).join(", ")}{article.authors.length > 3 ? " et al." : ""}
@@ -898,7 +907,7 @@ function ArticleItem({ article, status, queuePos, emailSelected, isDesktop, onDo
       {expanded && (
         <div style={{ marginTop: "0.6rem", fontSize: "0.82rem", lineHeight: 1.65, color: "var(--color-text-primary, #1A2332)", fontFamily: "'Lora', Georgia, serif", background: "var(--color-bg, #F5F0E8)", borderRadius: "0.25rem", padding: "0.75rem 1rem", borderLeft: "3px solid var(--color-accent, #C0783A)" }}>
           {article.abstract
-            ? article.abstract
+            ? stripXmlTags(article.abstract)
             : <span style={{ fontStyle: "italic", opacity: 0.7 }}>No abstract available.</span>}
         </div>
       )}

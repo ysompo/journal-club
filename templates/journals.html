@@ -134,7 +134,7 @@
               <span class="text-xs font-label font-medium text-secondary uppercase tracking-wide">{{ a.article_type }}</span>
             </div>
             {% endif %}
-            <p class="font-semibold text-sm text-on-surface leading-snug">{{ a.title }}</p>
+            <p class="font-semibold text-sm text-on-surface leading-snug">{{ a.title | striptags }}</p>
             {% if a.authors %}
             <p class="text-xs text-slate-400 mt-0.5">
               {{ a.authors[:3] | join(', ') }}{% if a.authors | length > 3 %} et al.{% endif %}
@@ -182,7 +182,7 @@
         <!-- Expanded: abstract -->
         <div class="article-detail hidden px-4 pb-4">
           {% if a.abstract %}
-          <p class="text-sm text-on-surface-variant leading-relaxed border-t border-slate-100 pt-3">{{ a.abstract }}</p>
+          <p class="text-sm text-on-surface-variant leading-relaxed border-t border-slate-100 pt-3">{{ a.abstract | striptags }}</p>
           {% else %}
           <p class="text-sm text-slate-400 italic border-t border-slate-100 pt-3">No abstract available.</p>
           {% endif %}
@@ -319,7 +319,7 @@ window.addEventListener('load', function() {
             ? document.querySelector(`.toc-article[data-id="${item.toc_article_id}"] .pdf-btn`)
             : null;
           if (qBtn) {
-            qBtn.disabled = true;
+            qBtn.dataset.dlState = 'queued';
             // position is 1-based: queue[0] = #1, queue[1] = #2, etc.
             qBtn.innerHTML = `<span class="material-symbols-outlined text-sm">schedule</span> Queued (#${i + 1})`;
             pollDownload(item.article_id, qBtn);
@@ -495,9 +495,11 @@ function downloadPdf(url, tocArticleId, btn) {
     return;
   }
 
-  btn.disabled = true;
-  btn.dataset.dlState = 'queued';
+  // Prevent rapid double-click from queuing twice
+  if (currentState === 'starting') return;
+  btn.dataset.dlState = 'starting';
   btn.innerHTML = '<span class="material-symbols-outlined text-sm">hourglass_empty</span> Queuing…';
+  btn.classList.replace('bg-primary', 'bg-amber-500');
   fetch('./download', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},

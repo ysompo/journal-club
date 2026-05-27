@@ -20,9 +20,11 @@ from bs4 import BeautifulSoup
 
 
 def _strip_html(text: str) -> str:
-    """Remove HTML/XML tags and decode entities from metadata strings."""
-    text = re.sub(r'<[^>]+>', '', text)
-    return html.unescape(text).strip()
+    """Remove HTML/XML tags (including JATS) and decode entities."""
+    text = html.unescape(text)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
 
 _HEADERS = {
     "User-Agent": (
