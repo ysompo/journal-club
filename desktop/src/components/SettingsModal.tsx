@@ -98,7 +98,13 @@ export function SettingsModal({ onClose, hujiEmail, onSaveHuji }: Props) {
         setUpdateStatus({ state: "up-to-date" });
       }
     } catch (e) {
-      setUpdateStatus({ state: "error", message: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      // Tauri updater throws when there's no valid release (i.e. already up to date)
+      if (msg.includes("release") || msg.includes("fetch") || msg.includes("endpoint")) {
+        setUpdateStatus({ state: "up-to-date" });
+      } else {
+        setUpdateStatus({ state: "error", message: msg });
+      }
     }
   }
 
