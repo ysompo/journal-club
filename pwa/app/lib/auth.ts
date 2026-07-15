@@ -8,6 +8,13 @@ export const API_URL =
 
 api.configure(API_URL);
 
+api.onUnauthorized = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login";
+  }
+};
+
 export function loadToken(): string | null {
   if (typeof window === "undefined") return null;
   const t = localStorage.getItem(TOKEN_KEY);

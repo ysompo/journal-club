@@ -75,6 +75,13 @@ function App() {
   });
 
   useEffect(() => {
+    api.onUnauthorized = () => {
+      clearToken();
+      setAppState("unauthenticated");
+    };
+  }, []);
+
+  useEffect(() => {
     if (!keychainLoaded) return;
 
     const token = loadStoredToken();
