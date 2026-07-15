@@ -38,6 +38,11 @@ export interface ClaimResponse {
 export class JournalClubApi {
   private token: string | null = null;
 
+  // Called when a request that carried a bearer token comes back 401 — i.e. the
+  // session itself is invalid/expired, not just a bad login/QR attempt. Wire this
+  // up to clear stored credentials and send the user back to a login screen.
+  onUnauthorized: (() => void) | null = null;
+
   constructor(public baseUrl: string) {}
 
   setToken(token: string | null) {
@@ -56,6 +61,7 @@ export class JournalClubApi {
   ): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers["Content-Type"] = "application/json";
+    const hadToken = !!this.token;
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
 
     const res = await fetch(`${this.baseUrl}${path}`, {
@@ -70,6 +76,11 @@ export class JournalClubApi {
         const err = await res.json();
         message = err.detail ?? message;
       } catch {}
+      if (res.status === 401 && hadToken) {
+        this.setToken(null);
+        this.onUnauthorized?.();
+        message = "Your session has expired — please sign in again.";
+      }
       throw new ApiError(res.status, message);
     }
 
@@ -138,6 +149,7 @@ export class JournalClubApi {
     const formData = new FormData();
     formData.append("file", pdfBlob, `${articleId}.pdf`);
     const headers: Record<string, string> = {};
+    const hadToken = !!this.token;
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     return fetch(`${this.baseUrl}/articles/${articleId}/pdf`, {
       method: "POST",
@@ -147,6 +159,11 @@ export class JournalClubApi {
       if (!res.ok) {
         let message = res.statusText;
         try { const e = await res.json(); message = e.detail ?? message; } catch {}
+        if (res.status === 401 && hadToken) {
+          this.setToken(null);
+          this.onUnauthorized?.();
+          message = "Your session has expired — please sign in again.";
+        }
         throw new ApiError(res.status, message);
       }
       return res.json() as Promise<ArticleWithMeta>;
