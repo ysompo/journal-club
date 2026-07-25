@@ -16,15 +16,16 @@ feature shipped inside the Flask app. Nothing is written to the app DB.
 
 ## Scope
 
-- **In scope:** deep multi-lens review of ONE paper at a time; seven specialist
+- **In scope:** deep multi-lens review of ONE paper at a time; eight specialist
   agents; a thin orchestration command; synthesis into a peer-review report
   printed to the terminal.
 - **Out of scope:** batch triage across many papers; DOI resolution / PDF
   download automation (the user uploads the PDF); persistence to
   `journal_club.db` or the reading list; any change to the Flask app.
-- **Web access:** exactly ONE agent (`appraisal-novelty`) may search the web,
-  solely to place the paper's claimed contribution against existing literature.
-  The other six agents are strictly paper-only.
+- **Web access:** exactly TWO agents may search the web — `appraisal-novelty`
+  (to place the paper's contribution against existing literature) and
+  `appraisal-references` (to verify the paper's cited references exist and
+  match). The other six agents are strictly paper-only.
 
 ## Substrate constraints (fixed by Claude Code)
 
@@ -47,24 +48,25 @@ Hub-and-spoke:
       │  validate path is an existing PDF
       ├──▶ appraisal-methodologist      ┐
       ├──▶ appraisal-statistician       │
-      ├──▶ appraisal-claims-auditor     │  7 Task subagents,
-      ├──▶ appraisal-clinical-relevance │  dispatched in parallel,
-      ├──▶ appraisal-integrity          │  each given the same PDF path
-      ├──▶ appraisal-writing            │  (novelty may also search the web)
-      └──▶ appraisal-novelty  (web)     ┘
-      │  collect 7 structured reports
+      ├──▶ appraisal-claims-auditor     │
+      ├──▶ appraisal-clinical-relevance │  8 Task subagents, dispatched in
+      ├──▶ appraisal-integrity          │  parallel, each given the same
+      ├──▶ appraisal-writing            │  PDF path (novelty & references
+      ├──▶ appraisal-novelty     (web)  │  may also search the web)
+      └──▶ appraisal-references  (web)  ┘
+      │  collect 8 structured reports
       ▼
    synthesis (hub) ──▶ peer-review report printed to terminal
 ```
 
 ## Components
 
-### The seven spoke agents
+### The eight spoke agents
 
 All are `.claude/agents/<name>.md`, read-only. Six use tools `Read, Grep, Glob,
-Bash` and are paper-only (no web). The seventh, `appraisal-novelty`, additionally
-gets `WebSearch, WebFetch`. Each has exactly one job so lenses do not overlap and
-produce contradictory verdicts.
+Bash` and are paper-only (no web). Two — `appraisal-novelty` and
+`appraisal-references` — additionally get `WebSearch, WebFetch`. Each has exactly
+one job so lenses do not overlap and produce contradictory verdicts.
 
 | Agent | Owns | Does NOT do |
 |---|---|---|
@@ -74,7 +76,8 @@ produce contradictory verdicts.
 | `appraisal-clinical-relevance` | Applicability to practice; population; patient-important vs. surrogate outcomes; actionability | Methods/stats verdicts; novelty vs. literature |
 | `appraisal-integrity` | Funding source & conflicts of interest; IRB/ethics approval & consent; pre-registration & protocol adherence (outcome switching vs. registry); data/code availability | Scientific validity of the results |
 | `appraisal-writing` | Prose coherence & clarity (unreadable/ambiguous sentences); internal inconsistencies between sections; undefined acronyms/terms; figure/table-vs-text mismatches; typos & grammar. Leads with clarity; typos secondary since papers are usually copyedited | Scientific validity; statistics; claims |
-| `appraisal-novelty` *(web-enabled)* | The paper's claimed contribution vs. existing literature: is it novel, incremental, or redundant? Finds prior/similar work, related trials, existing reviews. **Only web-enabled agent.** | Methods/stats/claims validity; clinical applicability |
+| `appraisal-novelty` *(web-enabled)* | The paper's claimed contribution vs. existing literature: is it novel, incremental, or redundant? Finds prior/similar work, related trials, existing reviews. | Methods/stats/claims validity; clinical applicability; reference accuracy |
+| `appraisal-references` *(web-enabled)* | Factual audit of the bibliography: for each cited reference, verify it exists online and matches (title/authors/journal/year/DOI). Classify Verified / Discrepancy / Unverified; flag Unverified for the user to check. | Any appraisal of the science; whether a citation is *appropriate* (only whether it is *real & accurate*) |
 
 `appraisal-methodologist` is the **refactor** of the existing
 `.claude/agents/critical-appraisal.md`: claim-checking and deep-stats
@@ -93,15 +96,24 @@ citation from memory. If web is unavailable (proxy failure, no results), it
 falls back to a paper-only judgment of the *stated* contribution and explicitly
 flags that it could not verify against the live literature.
 
+**`appraisal-references` web rules:** for each reference, attempt to locate it
+online (by DOI first, then title + first author). Classify **Verified** (found;
+metadata matches — cite the retrieved DOI/URL), **Discrepancy** (found, but
+year/authors/journal/pages disagree — show both), or **Unverified** (could not
+locate). **"Not found" is NOT "fabricated"** — search coverage is imperfect, so
+Unverified means *flag and ask the user to verify*, never an assertion that the
+citation is fake. Verdicts must rest on sources actually retrieved, not memory.
+If web is unavailable, report that references could not be checked this run.
+
 ### The hub command
 
 `.claude/commands/appraise.md` — a project slash command that:
 
 1. Takes one argument: a path to an already-uploaded PDF.
 2. Validates the path exists and is a readable PDF; if not, stops and asks.
-3. Dispatches the seven agents in parallel via `Task`, each given the same
+3. Dispatches the eight agents in parallel via `Task`, each given the same
    absolute path.
-4. Collects the seven reports.
+4. Collects the eight reports.
 5. Synthesizes them into the peer-review output (below) using a fixed template
    embedded in the command, so every paper gets an identical report shape.
 6. Prints the report to the terminal.
@@ -130,6 +142,11 @@ Source: <pdf-path>   |   Full text: Yes/No
 - **Clarity/coherence:** <ambiguous sentence, contradiction between sections, undefined term> ...
 - **Typos & grammar:** <line-referenced list; may be "none of note">
 
+## Reference check
+Verified <n>/<total>.
+- **Discrepancy:** <ref> — <what disagrees> (retrieved: <DOI/URL>)
+- **⚠ Unverified — please verify online:** <ref as printed in the paper>
+
 ## Unable to assess
 - <item the agents could not evaluate from the text>
 
@@ -147,7 +164,8 @@ section (kept separate so a typo/clarity list never drowns the scientific
 comments; a clarity issue is promoted to a Major comment only when it makes a
 result genuinely uninterpretable); novelty → the Assessment (framing the paper's
 contribution) and, when the claimed novelty is contradicted by cited prior work,
-a Major comment.
+a Major comment; references → the dedicated Reference check section (Unverified
+items flagged for the user to confirm).
 
 Verdict vocabulary: **peer-review style** — Accept / Minor revisions /
 Major revisions / Reject.
@@ -163,6 +181,9 @@ Major revisions / Reject.
 - **Novelty web unavailable** → the novelty lens degrades to a paper-only
   contribution judgment and flags it could not verify against live literature;
   the run still completes.
+- **References web unavailable** → the reference check reports it could not
+  verify the bibliography this run; no reference is called fabricated on a failed
+  or empty search — Unverified always means "flag for the user," never "fake."
 - **Agents conflict** → hub resolves into major/minor comments; genuine
   unresolved tension is stated in the review body rather than smoothed away.
 
@@ -186,6 +207,7 @@ unit tests.
 - `.claude/agents/appraisal-integrity.md` (new)
 - `.claude/agents/appraisal-writing.md` (new)
 - `.claude/agents/appraisal-novelty.md` (new; adds `WebSearch, WebFetch` tools)
+- `.claude/agents/appraisal-references.md` (new; adds `WebSearch, WebFetch` tools)
 - `.claude/commands/appraise.md` (new)
 - `.gitignore` already un-ignores `.claude/agents/`; add `!.claude/commands/`
   so the command is tracked too.
