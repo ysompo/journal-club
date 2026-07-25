@@ -7,7 +7,8 @@ __pycache__/
 !desktop/index.html
 *.zip
 captured_cookies.json
-.claude/
+.claude/*
+!.claude/agents/
 .playwright-mcp/
 stitch_extracted/
 downloads/
