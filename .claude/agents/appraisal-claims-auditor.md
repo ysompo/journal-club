@@ -108,7 +108,7 @@ this lens rather than grading them.
 **Verdict:** <one line>
 
 ### Findings
-- [Adequate|Concern|Serious concern|Not reported] <finding> — <section/page>
+- [Supported|Overreach|Spin|Causal overreach|Overgeneralization] "<quoted claim>" — <reason, section/page>
 
 ### Could not assess
 - <item>   (or: "- none")
