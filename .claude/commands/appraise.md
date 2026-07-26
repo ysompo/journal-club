@@ -56,9 +56,35 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
 
    ## Final decision
    **<Accept / Minor revisions / Major revisions / Reject>.**
-   <one-paragraph justification, incl. GRADE-style certainty>
+   <one-paragraph justification: apply the Editorial decision rule below,
+   state the deciding salvageability question and your answer, and include
+   GRADE-style certainty>
+
+**Editorial decision rule (you are the editor — do NOT just average the lens
+severities).** Choose the verdict by the salvageability test — *can the paper's
+central claim survive a reanalysis of the dataset already in hand?*
+
+- **Reject** when fixing the core problem needs NEW data (a new/external or
+  larger cohort, or measurements never taken) or when the headline result rests
+  on a defect that reanalysis of the current data cannot cure — e.g. label/outcome
+  leakage, or outcome-derived imputation of a large share of the key inputs — or
+  when a confirmed prior work makes the contribution redundant. "Reject but
+  resubmit after collecting new data" is editorially a **Reject** — do NOT
+  downgrade it to Major revisions to match a journal's revise-and-resubmit
+  culture; if venue convention matters, note it as a separate sentence, but let
+  the scientific call stand.
+- **Major revisions** when there are serious flaws BUT the central claim can
+  survive reanalysis of the EXISTING data (re-run without the leaky feature,
+  redo the stats, add CIs, restructure) with no new data collection.
+- **Minor revisions** when issues are real but correctable and none threatens the
+  central result.
+- **Accept** only when the full text was read and no material issue remains.
+
+Never rate above what the available evidence supports: if `Full text: No`, or if
+any lens did not report (a *partial* run), the verdict is capped — a paper you
+could not fully read, or fully review, cannot be Accepted, and a decisive
+Reject-level defect found by even one reporting lens still governs.
 
 **Synthesis rules:** Do not invent content beyond the agents' reports. Where two
 lenses disagree, resolve into major/minor comments and, if the tension is
-genuine and unresolved, state it plainly in the body. If `Full text: No`, caveat
-the verdict explicitly (a paper you could not fully read cannot be Accepted).
+genuine and unresolved, state it plainly in the body.
