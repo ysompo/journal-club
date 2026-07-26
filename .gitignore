@@ -9,6 +9,7 @@ __pycache__/
 captured_cookies.json
 .claude/*
 !.claude/agents/
+!.claude/commands/
 .playwright-mcp/
 stitch_extracted/
 downloads/

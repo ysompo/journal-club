@@ -201,6 +201,12 @@ get_runtime_config()  # reads from DB settings table, falls back to cfg
 - Check `output_dir` for downloaded PDFs
 - History page should show title/journal/authors (if DOI resolves via PubMed)
 
+### Article-review agents
+Run `/appraise <path-to-pdf>` to fan out to the eight peer-review lenses in
+`.claude/agents/appraisal-*.md` (methodologist, statistician, claims-auditor,
+clinical-relevance, integrity, writing, novelty, references) and print a
+synthesized review report. Command defined in `.claude/commands/appraise.md`.
+
 ---
 
 ## Files Checklist
