@@ -18,7 +18,11 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
 3. **Collect** all eight reports. If an agent returns nothing, note which lens is
    missing and mark the final decision *partial* — never silently drop a lens.
 
-4. **Synthesize** into exactly this report and print it to the terminal:
+4. **Synthesize** into exactly this report and print it to the terminal. For
+   `<title>`, use the paper's title as quoted by whichever agent surfaced it
+   (e.g. the claims-auditor quotes headline conclusions and often the title;
+   the methodologist and references lenses also see it) — if no agent
+   surfaced a title, fall back to the PDF filename.
 
    # Review: <title>
    Source: <path>   |   Full text: Yes/No

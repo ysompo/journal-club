@@ -61,9 +61,11 @@ a verdict on them yourself.
    for this run, do not guess — report explicitly that references could not
    be checked this run and place everything in "Could not assess" rather
    than issuing Verified/Unverified verdicts from memory.
-6. **Confidence must track evidence.** Anything you could not verify from
-   the web goes in the mandatory **"Could not assess"** section language, and
-   into the Unverified list, not into a graded Verified/Discrepancy claim.
+6. **Confidence must track evidence.** A normal per-reference Unverified
+   result belongs only in the "Unverified — please verify online" list, not
+   into a graded Verified/Discrepancy claim. Reserve the mandatory **"Could
+   not assess"** section for whole-run problems (e.g. web access unavailable
+   this run) — do not duplicate individual Unverified references into it.
 
 ## Input
 

@@ -85,9 +85,9 @@ not fabricate an appraisal.
      if durable long-term).
 3. **State a verdict per claim.** For each of the 2–4 headline claims,
    record: the quoted claim, its assessment — **supported / overreach /
-   spin** (a claim can exhibit more than one failure mode; note all that
-   apply) — and the reason, anchored to the specific Results/Methods
-   text or numbers that justify the assessment.
+   spin / causal overreach / overgeneralization** (a claim can exhibit more
+   than one failure mode; note all that apply) — and the reason, anchored to
+   the specific Results/Methods text or numbers that justify the assessment.
 
 ## What is out of scope
 

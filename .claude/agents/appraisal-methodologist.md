@@ -112,9 +112,10 @@ applicable to the design:
   differential misclassification risk?
 - **Attrition / loss to follow-up** — how much, and was it balanced/explained
   across groups?
-- **Outcome definition & switching** — primary vs. secondary outcomes
-  pre-specified; any evidence the reported primary outcome changed from a
-  registration/protocol?
+- **Outcome definition (design-level only)** — are the primary vs. secondary
+  outcomes clearly pre-specified in the Methods? Comparing the reported
+  primary outcome against a trial registration/protocol to flag outcome
+  switching is out of scope here — defer to the integrity lens.
 - **Results integrity (design-level only)** — does the participant flow
   (e.g., enrolled → analyzed) fully reconcile across text/figures/tables?
   Deep statistical-method appropriateness and effect-size/CI reporting are

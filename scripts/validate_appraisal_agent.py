@@ -19,7 +19,8 @@ def _split_frontmatter(text):
 
 def validate(path, require_web=False, required=None):
     errors = []
-    text = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
     fm_text, body = _split_frontmatter(text)
     if fm_text is None:
         return ["no YAML frontmatter (--- ... ---) found"]

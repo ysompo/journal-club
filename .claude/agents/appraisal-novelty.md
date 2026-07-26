@@ -131,10 +131,11 @@ this lens rather than grading them.
 **Verdict:** <one line>
 
 ### Findings
-- [Adequate|Concern|Serious concern|Not reported] <finding> — <section/page>
+- [Novel|Incremental|Redundant|Could not verify] <claimed contribution> — <reason; source>
 
 ### Could not assess
 - <item>   (or: "- none")
 
 ### Sources
+List only URLs you actually retrieved with WebFetch this session.
 - <label> — <URL retrieved>
