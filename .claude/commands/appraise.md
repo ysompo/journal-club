@@ -1,5 +1,5 @@
 ---
-description: Run the 8-agent article-review network on an uploaded PDF and print a peer-review report.
+description: Run the 9-agent article-review network on an uploaded PDF and print a peer-review report.
 argument-hint: <path-to-pdf>
 ---
 
@@ -9,13 +9,13 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
    `test -f "$ARGUMENTS" && file "$ARGUMENTS"` — if the file does not exist or is
    not a PDF, tell the user and stop. Do NOT dispatch any agent until the path is valid.
 
-2. **Fan out (in parallel, one message, eight Task calls).** Dispatch all eight
+2. **Fan out (in parallel, one message, nine Task calls).** Dispatch all nine
    agents, each with the same absolute PDF path in its prompt:
    appraisal-methodologist, appraisal-statistician, appraisal-claims-auditor,
    appraisal-clinical-relevance, appraisal-integrity, appraisal-writing,
-   appraisal-novelty, appraisal-references.
+   appraisal-novelty, appraisal-references, appraisal-plausibility.
 
-3. **Collect** all eight reports. If an agent returns nothing, note which lens is
+3. **Collect** all nine reports. If an agent returns nothing, note which lens is
    missing and mark the final decision *partial* — never silently drop a lens.
 
 4. **Synthesize** into exactly this report and print it to the terminal. For
@@ -32,7 +32,10 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
 
    ## Assessment
    <design appropriateness, framework used (from methodologist), novelty framing
-   (from novelty), overall credibility>
+   (from novelty), soundness of the clinical/biological rationale and background
+   (from plausibility), overall credibility. A weak clinical rationale, an absent
+   or implausible mechanism, or a domain-implausible key predictor becomes a
+   Major comment.>
 
    ## Major comments
    1. <substantive issues that change interpretation — drawn from statistician,
