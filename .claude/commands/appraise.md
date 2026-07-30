@@ -1,5 +1,5 @@
 ---
-description: Run the 9-agent article-review network on an uploaded PDF and print a point-by-point Comments to the Authors review letter.
+description: Run the 10-agent article-review network on an uploaded PDF and print a point-by-point Comments to the Authors review letter.
 argument-hint: <path-to-pdf>
 ---
 
@@ -9,16 +9,39 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
    `test -f "$ARGUMENTS" && file "$ARGUMENTS"` — if the file does not exist or is
    not a PDF, tell the user and stop. Do NOT dispatch any agent until the path is valid.
 
-2. **Fan out (in parallel, one message, nine Task calls).** Dispatch all nine
-   agents, each with the same absolute PDF path in its prompt:
+2. **Triage (adaptive lens selection — you are the manager).** Before
+   dispatching, read enough of the PDF yourself (abstract, the Methods headings,
+   and a scan of the section structure) to classify the paper: study design,
+   quantitative vs. purely qualitative/theoretical, clinical vs. basic-science,
+   and whether it has a substantive bibliography. Then choose which lenses to run:
+   - **Always run:** appraisal-methodologist, appraisal-claims-auditor,
+     appraisal-integrity, appraisal-writing, appraisal-plausibility,
+     appraisal-scope.
+   - **appraisal-statistician:** run unless the paper contains no quantitative
+     analysis at all (pure qualitative/theoretical).
+   - **appraisal-clinical-relevance:** run for clinical/applied papers; skip only
+     when there is no clinical or applied claim whatsoever.
+   - **appraisal-novelty and appraisal-references (web-enabled):** run when web
+     access is available. If a quick check shows egress is blocked (e.g. a 403
+     from the proxy on a test fetch), you may still run them but note they will
+     degrade to "could not verify," or skip them with that reason.
+   **When in doubt, run the lens.** A deliberately skipped lens is NOT a *partial*
+   run — it is an intentional skip recorded with a one-line reason.
+
+3. **Fan out (in parallel, one message, one Task call per selected lens — up to
+   ten).** Dispatch each selected agent with the same absolute PDF path in its
+   prompt; never dispatch a lens you decided to skip. Full roster:
    appraisal-methodologist, appraisal-statistician, appraisal-claims-auditor,
    appraisal-clinical-relevance, appraisal-integrity, appraisal-writing,
-   appraisal-novelty, appraisal-references, appraisal-plausibility.
+   appraisal-novelty, appraisal-references, appraisal-plausibility,
+   appraisal-scope.
 
-3. **Collect** all nine reports. If an agent returns nothing, note which lens is
-   missing and mark the final decision *partial* — never silently drop a lens.
+4. **Collect** every dispatched report. A lens you *dispatched* that returns
+   nothing is a **missing** lens → mark the recommendation *partial* and name it.
+   A lens you deliberately **skipped** in triage is not missing — record it under
+   "Lenses run" as skipped-with-reason. Never silently drop a dispatched lens.
 
-4. **Synthesize** into a point-by-point **Comments to the Authors** review letter
+5. **Synthesize** into a point-by-point **Comments to the Authors** review letter
    and print exactly this structure to the terminal. This author-facing letter —
    numbered points, each one actionable and anchored to a section/page/table — is
    the deliverable of this command. Address the authors directly and
@@ -31,6 +54,7 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
 
    # Comments to the Authors — <title>
    Source: <path>   |   Full text read: Yes/No
+   Lenses run: <n>/10 (<list any skipped as "skipped: <lens> — <reason>", or "all applicable">)
 
    <One short opening paragraph to the authors: thank them, and restate in one or
    two sentences what the paper did and found (primary result + effect) to show it
@@ -61,6 +85,11 @@ You are orchestrating an article appraisal. The PDF path is: $ARGUMENTS
    ## Writing & presentation
    - Clarity/coherence: <issues that impede comprehension, or "reads clearly">
    - Typos & grammar: <line-referenced list, or "none of note">
+
+   ## Structure & scope
+   From the scope lens: length vs. content, breadth (too broad/narrow), section
+   balance, and article-type fit — each anchored to a section, never a vibe.
+   ("- well-proportioned; no structural concerns" if clean.)
 
    ## Citations
    Verified <n>/<total>.
@@ -102,3 +131,13 @@ decisive Reject-level defect found by even one reporting lens still governs.
 **Synthesis rules:** Do not invent content beyond the agents' reports. Where two
 lenses disagree, resolve into major/minor comments and, if the tension is
 genuine and unresolved, state it plainly in the body.
+
+6. **Quality-control pass (manager, before printing).** Re-read the raw lens
+   reports against your drafted letter and check: (a) every Serious-concern or
+   load-bearing finding made it into a Major/Minor point or the recommendation —
+   nothing dropped; (b) genuine cross-lens disagreements were surfaced, not
+   smoothed away; (c) the union of "could not assess" items is complete; (d) the
+   recommendation follows the Editorial decision rule and is capped correctly for
+   any partial run; (e) "Lenses run" honestly lists skips. Fix the letter for any
+   gap you find, then print. This QC pass is silent — only the final letter is
+   printed.
